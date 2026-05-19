@@ -28,5 +28,5 @@ class ServiceDiscoverer:
                             )
                         services.append(service)
                     except Exception as e:
-                        print(f"Error parsing {sd_abspath}: {e}")
+                        raise ValueError(f"Error parsing {sd_abspath}: {e}") from e
         return services

@@ -90,7 +90,32 @@ class ServiceMetadata:
         if not self.runtime:
             raise ValueError("SDConfig must have a 'runtime' field.")
         
-        # Validate at least one of docker or local is provided
+        if self.runtime.type not in {"docker", "local"}:
+            raise ValueError(
+                f"Unsupported runtime type '{self.runtime.type}'. Expected 'docker' or 'local'."
+            )
+
+        if self.runtime.type == "docker":
+            if not self.docker:
+                raise ValueError(
+                    "SDConfig with runtime.type 'docker' must define a 'docker' section."
+                )
+            if not self.docker.compose_file:
+                raise ValueError(
+                    "SDConfig with runtime.type 'docker' must define 'docker.compose_file'."
+                )
+
+        if self.runtime.type == "local":
+            if not self.local:
+                raise ValueError(
+                    "SDConfig with runtime.type 'local' must define a 'local' section."
+                )
+            if not self.local.systemd_services:
+                raise ValueError(
+                    "SDConfig with runtime.type 'local' must define 'local.systemd_services'."
+                )
+
+        # Validate at least one metadata section exists for non-runtime consumers.
         if not self.docker and not self.local:
             raise ValueError("SDConfig must have at least one of 'docker' or 'local' sections.")
         
@@ -108,10 +133,10 @@ class ServiceMetadata:
         )
 
         docker_data = data.get('docker')
-        docker = DockerSection.from_dict(docker_data) if docker_data else None
+        docker = DockerSection.from_dict(docker_data) if docker_data is not None else None
 
         local_data = data.get('local')
-        local = LocalSection.from_dict(local_data) if local_data else None
+        local = LocalSection.from_dict(local_data) if local_data is not None else None
 
         return cls(
             name=data.get('name'),

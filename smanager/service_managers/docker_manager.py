@@ -9,13 +9,21 @@ from ..datatypes import ServiceStatus, SingleStatus
 class DockerManager(BaseSDV2Manager):
     def __init__(self, service: Service, vpn: VPNService, restart_delay: int = 5):
         super().__init__(service, vpn, restart_delay)
-        self._compose_path = self.service.metadata.docker.compose_file
+
+    def _get_compose_file_name(self) -> str:
+        docker_metadata = self.service.metadata.docker
+        if not docker_metadata or not docker_metadata.compose_file:
+            raise ValueError(
+                f"Service '{self.get_id()}' is configured as docker but is missing "
+                "'docker.compose_file'."
+            )
+        return docker_metadata.compose_file
 
     def _get_compose_file_path(self) -> str:
         """Returns the path to the docker compose.yml file for this service."""
         return os.path.join(
             self.service.service_abspath, 
-            self.service.metadata.docker.compose_file
+            self._get_compose_file_name()
             )
     
     def start(self):

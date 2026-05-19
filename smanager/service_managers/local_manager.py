@@ -9,14 +9,23 @@ class LocalManager(BaseSDV2Manager):
     def __init__(self, service: Service, vpn: VPNService, restart_delay: int = 5):
         super().__init__(service, vpn, restart_delay)
 
+    def _get_systemd_services(self) -> list[str]:
+        local_metadata = self.service.metadata.local
+        if not local_metadata or not local_metadata.systemd_services:
+            raise ValueError(
+                f"Service '{self.get_id()}' is configured as local but is missing "
+                "'local.systemd_services'."
+            )
+        return local_metadata.systemd_services
+
     def start(self):
         """Start the local systemd service."""
-        for service_name in self.service.metadata.local.systemd_services:
+        for service_name in self._get_systemd_services():
             subprocess.run(["systemctl", "start", service_name], check=True)
     
     def stop(self):
         """Stop the local systemd service."""
-        for service_name in self.service.metadata.local.systemd_services:
+        for service_name in self._get_systemd_services():
             subprocess.run(["systemctl", "stop", service_name], check=True)
 
     def restart(self):
@@ -30,7 +39,7 @@ class LocalManager(BaseSDV2Manager):
     def status(self)-> ServiceStatus:
         """Check the status of the local systemd service and return a ServiceStatus object."""
         service_statuses = []
-        for service_name in self.service.metadata.local.systemd_services:
+        for service_name in self._get_systemd_services():
             result = subprocess.run(["systemctl", "is-active", service_name], capture_output=True, text=True)
             status = SingleStatus(
                 name=service_name,

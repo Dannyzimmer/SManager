@@ -65,7 +65,10 @@ def build_manager(config_path: str | None) -> GlobalManager:
         raise click.ClickException(
             f"Unknown VPN provider '{config.vpn_provider}': {e}"
         )
-    return GlobalManager(config.services_dir, config, vpn)
+    try:
+        return GlobalManager(config.services_dir, config, vpn)
+    except ValueError as e:
+        raise click.ClickException(str(e)) from e
 
 
 def get_manager(ctx: click.Context) -> GlobalManager:
