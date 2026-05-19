@@ -1,0 +1,26 @@
+{
+    "name":"Sonarr",
+    "description":"Monitor and manage TV series, connects to qBittorrent",
+    "schema_version":2,
+    "id":"sonarr",
+    "groups": ["media"],
+    "active":true,
+    "runtime":{
+        "type":"local",
+        "ports":{
+            "webui":8989
+        },
+        "sys_user":"sonarr",
+        "sys_group":"media"
+    },
+    "docker":{
+        "containers":[],
+        "compose_file":"compose.yaml"
+    },
+    "local":{
+        "installation_path":"/opt/Sonarr",
+        "appdata_path":"/var/lib/sonarr",
+        "systemd_services":["sonarr"]
+    },
+    "depends_on":["qbittorrent"]
+}

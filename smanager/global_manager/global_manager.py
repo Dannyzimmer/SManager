@@ -1,0 +1,103 @@
+from ..service_managers import DockerManager, LocalManager, BaseManager
+from ..datatypes import Service, GlobalConfig, ServiceStatus, MultiStatus
+from ..vpn import VPNService
+from . import BaseGlobalManager
+
+class GlobalManager(BaseGlobalManager):
+    """GlobalManager is responsible for searching and managing all services found in the 
+    specified services directory. It uses the appropriate service manager (DockerManager
+    or LocalManager) based on the service metadata.
+    """
+
+    def __init__(self, services_dir: str, global_config: GlobalConfig, vpn: VPNService):
+        super().__init__(services_dir, global_config, vpn)
+
+    def _find_service_by_id(self, service_id: str) -> Service:
+        """Helper method to find a service by its unique identifier."""
+        for service in self.services:
+            if service.metadata.id == service_id:
+                return service
+        raise ValueError(f"Service with ID '{service_id}' not found.")
+
+    def get_service_manager(self, service: Service, restart_delay: int = 5) -> BaseManager:
+        """Get the appropriate service manager for the given service based on its metadata."""
+        if service.metadata.runtime.type == "docker":
+            return DockerManager(service, self.vpn, restart_delay=restart_delay)
+        elif service.metadata.runtime.type == "local":
+            return LocalManager(service, vpn=self.vpn, restart_delay=restart_delay)
+        else:
+            raise ValueError(f"Unsupported runtime type: {service.metadata.runtime.type}")
+        
+    def get_group(self, group_name: str) -> list[Service]:
+        """Get all services that belong to the specified group."""
+        return [s for s in self.services if s.metadata.groups and group_name in s.metadata.groups]
+    
+    def get_services_by_dependency(self, dependency_name: str) -> list[Service]:
+        """Get all services that depend on the specified dependency."""
+        return [s for s in self.services if s.metadata.depends_on and dependency_name in s.metadata.depends_on]
+    
+    def manage_service(self, service_id: str, action: str):
+        """Manage a service by performing the specified action (start, stop, restart,
+        enable, disable).
+        """
+        service = self._find_service_by_id(service_id)
+        manager = self.get_service_manager(service)
+        
+        if action == "start":
+            manager.start()
+        elif action == "stop":
+            manager.stop()
+        elif action == "restart":
+            manager.restart()
+        elif action == "enable":
+            manager.enable()
+        elif action == "disable":
+            manager.disable()
+        else:
+            raise ValueError(f"Unsupported action: {action}")
+        
+    def manage_group(self, group_name: str, action: str):
+        """Manage all services in a group by performing the specified action 
+        (start, stop, restart, enable, disable).
+        """
+        services = self.get_group(group_name)
+        for service in services:
+            self.manage_service(service.metadata.id, action)
+
+    def manage_by_dependency(self, dependency_name: str, action: str):
+        """Manage all services that depend on a specific dependency by performing the 
+        specified action (start, stop, restart, enable, disable).
+        """
+        services = self.get_services_by_dependency(dependency_name)
+        for service in services:
+            self.manage_service(service.metadata.id, action)
+    
+    def manage_all(self, action: str):
+        """Manage all services by performing the specified action (start, stop, restart, 
+        enable, disable)."""
+        for service in self.services:
+            self.manage_service(service.metadata.id, action)
+        
+    def get_status(self, service_id: str) -> ServiceStatus:
+        """Get the status of a specific service by its ID."""
+        service = self._find_service_by_id(service_id)
+        manager = self.get_service_manager(service)
+        return manager.status()
+    
+    def get_group_status(self, group_name: str) -> MultiStatus:
+        """Get the status of all services in a group."""
+        services = self.get_group(group_name)
+        statuses = [self.get_status(service.metadata.id) for service in services]
+        return MultiStatus(services=statuses)
+    
+    def get_dependency_status(self, dependency_name: str) -> MultiStatus:
+        """Get the status of all services that depend on a specific dependency."""
+        services = self.get_services_by_dependency(dependency_name)
+        statuses = [self.get_status(service.metadata.id) for service in services]
+        return MultiStatus(services=statuses)
+    
+    def get_all_status(self) -> MultiStatus:
+        """Get the status of all services."""
+        statuses = [self.get_status(service.metadata.id) for service in self.services]
+        return MultiStatus(services=statuses)
+    
