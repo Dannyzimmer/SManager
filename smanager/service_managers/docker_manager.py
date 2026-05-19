@@ -58,6 +58,6 @@ class DockerManager(BaseSDV2Manager):
         return ServiceStatus(
             id=self.get_id(), 
             type=self.service.metadata.runtime.type,
-            services=service_statuses
+            statuses=service_statuses
         )
     
