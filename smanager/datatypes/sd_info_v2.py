@@ -41,11 +41,26 @@ class DockerSection:
     containers: Optional[list] = None
     compose_file: Optional[str] = None
 
+    @classmethod
+    def from_dict(cls, data: dict) -> 'DockerSection':
+        return cls(
+            containers=data.get('containers'),
+            compose_file=data.get('compose_file')
+        )
+
 @dataclass
 class LocalSection:
     installation_path: Optional[str] = None
-    app_path: Optional[str] = None
+    appdata_path: Optional[str] = None
     systemd_services: Optional[list] = None
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'LocalSection':
+        return cls(
+            installation_path=data.get('installation_path'),
+            appdata_path=data.get('appdata_path'),
+            systemd_services=data.get('systemd_services')
+        )
 
 @dataclass
 class ServiceMetadata:
@@ -93,10 +108,10 @@ class ServiceMetadata:
         )
 
         docker_data = data.get('docker')
-        docker = DockerSection(**docker_data) if docker_data else None
+        docker = DockerSection.from_dict(docker_data) if docker_data else None
 
         local_data = data.get('local')
-        local = LocalSection(**local_data) if local_data else None
+        local = LocalSection.from_dict(local_data) if local_data else None
 
         return cls(
             name=data.get('name'),
