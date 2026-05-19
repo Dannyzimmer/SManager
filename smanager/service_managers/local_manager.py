@@ -7,7 +7,7 @@ from ..datatypes import ServiceStatus, SingleStatus
 
 class LocalManager(BaseSDV2Manager):
     def __init__(self, service: Service, vpn: VPNService, restart_delay: int = 5):
-        super().__init__()
+        super().__init__(service, vpn, restart_delay)
 
     def start(self):
         """Start the local systemd service."""

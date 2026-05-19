@@ -8,7 +8,7 @@ from ..datatypes import ServiceStatus, SingleStatus
 
 class DockerManager(BaseSDV2Manager):
     def __init__(self, service: Service, vpn: VPNService, restart_delay: int = 5):
-        super().__init__()
+        super().__init__(service, vpn, restart_delay)
         self._compose_path = self.service.metadata.docker.compose_file
 
     def _get_compose_file_path(self) -> str:
