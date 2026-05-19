@@ -21,12 +21,12 @@ class DockerManager(BaseSDV2Manager):
     def start(self):
         """Start the Docker service using docker compose."""
         compose_file = self._get_compose_file_path()
-        subprocess.run(["docker compose", "-f", compose_file, "up", "-d"], check=True)
+        subprocess.run(["docker", "compose", "-f", compose_file, "up", "-d"], check=True)
 
     def stop(self):
         """Stop the Docker service using docker compose."""
         compose_file = self._get_compose_file_path()
-        subprocess.run(["docker compose", "-f", compose_file, "down"], check=True)
+        subprocess.run(["docker", "compose", "-f", compose_file, "down"], check=True)
 
     def restart(self):
         """Restart the Docker service using docker compose."""
@@ -41,10 +41,10 @@ class DockerManager(BaseSDV2Manager):
         ServiceStatus object.
         """
         compose_file = self._get_compose_file_path()
-        result = subprocess.run(["docker compose", "-f", compose_file, "ps", "--services", "--filter", "status=running"], capture_output=True, text=True)
+        result = subprocess.run(["docker", "compose", "-f", compose_file, "ps", "--services", "--filter", "status=running"], capture_output=True, text=True)
         running_services = set(result.stdout.strip().splitlines())
         
-        all_services_result = subprocess.run(["docker compose", "-f", compose_file, "config", "--services"], capture_output=True, text=True)
+        all_services_result = subprocess.run(["docker", "compose", "-f", compose_file, "config", "--services"], capture_output=True, text=True)
         all_services = set(all_services_result.stdout.strip().splitlines())
         
         service_statuses = []
