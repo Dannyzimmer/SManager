@@ -1,7 +1,7 @@
 """
 This module defines the data structures for the SDConfig v2
 """
-from dataclasses import dataclass, classmethod
+from dataclasses import dataclass
 from typing import Optional
 import json
 import os
