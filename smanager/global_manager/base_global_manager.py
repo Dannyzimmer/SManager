@@ -2,6 +2,7 @@ from ..service_managers import BaseManager
 from ..datatypes import Service, GlobalConfig, ServiceStatus, MultiStatus
 from ..crawler import ServiceDiscoverer
 from ..vpn import VPNService
+from ..events import ManagerEvent, ManagerEventDispatcher
 from abc import abstractmethod
 
 class BaseGlobalManager:
@@ -16,6 +17,44 @@ class BaseGlobalManager:
         self.vpn = vpn
         self.crawler = ServiceDiscoverer(services_dir, global_config.metadata_filename)
         self.services = self.discover_services()
+        self.event_dispatcher = ManagerEventDispatcher()
+
+    def on(self, callback, event_name: str | None = None):
+        """Register a callback for events emitted by this manager tree."""
+        self.event_dispatcher.on(callback, event_name)
+
+    def off(self, callback, event_name: str | None = None):
+        """Unregister a callback from the shared dispatcher."""
+        self.event_dispatcher.off(callback, event_name)
+
+    def _emit_event(
+        self,
+        *,
+        scope: str,
+        action: str,
+        phase: str,
+        service_id: str | None = None,
+        group_name: str | None = None,
+        dependency_name: str | None = None,
+        message: str | None = None,
+        payload: dict | None = None,
+        error: BaseException | None = None,
+    ) -> None:
+        self.event_dispatcher.emit(
+            ManagerEvent(
+                name=f"{scope}.{action}.{phase}",
+                scope=scope,
+                action=action,
+                phase=phase,
+                source=self.__class__.__name__,
+                service_id=service_id,
+                group_name=group_name,
+                dependency_name=dependency_name,
+                message=message,
+                payload=payload or {},
+                error=error,
+            )
+        )
 
     def discover_services(self) -> list[Service]:
         """Discover services in the specified services directory."""

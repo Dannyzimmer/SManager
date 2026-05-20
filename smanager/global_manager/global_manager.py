@@ -22,9 +22,19 @@ class GlobalManager(BaseGlobalManager):
     def get_service_manager(self, service: Service, restart_delay: int = 5) -> BaseManager:
         """Get the appropriate service manager for the given service based on its metadata."""
         if service.metadata.runtime.type == "docker":
-            return DockerManager(service, self.vpn, restart_delay=restart_delay)
+            return DockerManager(
+                service,
+                self.vpn,
+                restart_delay=restart_delay,
+                event_dispatcher=self.event_dispatcher,
+            )
         elif service.metadata.runtime.type == "local":
-            return LocalManager(service, vpn=self.vpn, restart_delay=restart_delay)
+            return LocalManager(
+                service,
+                vpn=self.vpn,
+                restart_delay=restart_delay,
+                event_dispatcher=self.event_dispatcher,
+            )
         else:
             raise ValueError(f"Unsupported runtime type: {service.metadata.runtime.type}")
         
@@ -43,40 +53,95 @@ class GlobalManager(BaseGlobalManager):
         service = self._find_service_by_id(service_id)
         manager = self.get_service_manager(service)
         
-        if action == "start":
-            manager.start()
-        elif action == "stop":
-            manager.stop()
-        elif action == "restart":
-            manager.restart()
-        elif action == "enable":
-            manager.enable()
-        elif action == "disable":
-            manager.disable()
-        else:
-            raise ValueError(f"Unsupported action: {action}")
+        try:
+            if action == "start":
+                manager.start()
+            elif action == "stop":
+                manager.stop()
+            elif action == "restart":
+                manager.restart()
+            elif action == "enable":
+                manager.enable()
+            elif action == "disable":
+                manager.disable()
+            else:
+                raise ValueError(f"Unsupported action: {action}")
+        except Exception:
+            raise
+
+    def _manage_collection(self, scope: str, identifier: str, services: list[Service], action: str):
+        self._emit_event(
+            scope=scope,
+            action=action,
+            phase="before",
+            group_name=identifier if scope == "group" else None,
+            dependency_name=identifier if scope == "dependency" else None,
+            payload={"service_count": len(services)},
+        )
+        try:
+            for service in services:
+                self.manage_service(service.metadata.id, action)
+        except Exception as exc:
+            self._emit_event(
+                scope=scope,
+                action=action,
+                phase="failed",
+                group_name=identifier if scope == "group" else None,
+                dependency_name=identifier if scope == "dependency" else None,
+                payload={"service_count": len(services)},
+                error=exc,
+            )
+            raise
+        self._emit_event(
+            scope=scope,
+            action=action,
+            phase="after",
+            group_name=identifier if scope == "group" else None,
+            dependency_name=identifier if scope == "dependency" else None,
+            payload={"service_count": len(services)},
+        )
         
     def manage_group(self, group_name: str, action: str):
         """Manage all services in a group by performing the specified action 
         (start, stop, restart, enable, disable).
         """
         services = self.get_group(group_name)
-        for service in services:
-            self.manage_service(service.metadata.id, action)
+        self._manage_collection("group", group_name, services, action)
 
     def manage_by_dependency(self, dependency_name: str, action: str):
         """Manage all services that depend on a specific dependency by performing the 
         specified action (start, stop, restart, enable, disable).
         """
         services = self.get_services_by_dependency(dependency_name)
-        for service in services:
-            self.manage_service(service.metadata.id, action)
+        self._manage_collection("dependency", dependency_name, services, action)
     
     def manage_all(self, action: str):
         """Manage all services by performing the specified action (start, stop, restart, 
         enable, disable)."""
-        for service in self.services:
-            self.manage_service(service.metadata.id, action)
+        self._emit_event(
+            scope="all",
+            action=action,
+            phase="before",
+            payload={"service_count": len(self.services)},
+        )
+        try:
+            for service in self.services:
+                self.manage_service(service.metadata.id, action)
+        except Exception as exc:
+            self._emit_event(
+                scope="all",
+                action=action,
+                phase="failed",
+                payload={"service_count": len(self.services)},
+                error=exc,
+            )
+            raise
+        self._emit_event(
+            scope="all",
+            action=action,
+            phase="after",
+            payload={"service_count": len(self.services)},
+        )
         
     def get_status(self, service_id: str) -> ServiceStatus:
         """Get the status of a specific service by its ID."""

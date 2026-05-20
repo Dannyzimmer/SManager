@@ -5,8 +5,8 @@ import time
 from ..datatypes import ServiceStatus, SingleStatus
 
 class LocalManager(BaseSDV2Manager):
-    def __init__(self, service: Service, vpn: VPNService, restart_delay: int = 5):
-        super().__init__(service, vpn, restart_delay)
+    def __init__(self, service: Service, vpn: VPNService, restart_delay: int = 5, event_dispatcher=None):
+        super().__init__(service, vpn, restart_delay, event_dispatcher=event_dispatcher)
 
     def _get_systemd_services(self) -> list[str]:
         local_metadata = self.service.metadata.local
@@ -19,23 +19,87 @@ class LocalManager(BaseSDV2Manager):
 
     def start(self):
         """Start the local systemd service."""
+        self._emit_event(
+            scope="service",
+            action="start",
+            phase="before",
+            service_id=self.get_id(),
+        )
         if not self.service.metadata.active:
+            self._emit_event(
+                scope="service",
+                action="start",
+                phase="skipped",
+                service_id=self.get_id(),
+                message="Service is inactive.",
+            )
             return # Don't start if the service is not active
-        for service_name in self._get_systemd_services():
-            self.subprocess_run(["systemctl", "start", service_name])
+        try:
+            for service_name in self._get_systemd_services():
+                self.subprocess_run(["systemctl", "start", service_name])
+        except Exception as exc:
+            self._emit_event(
+                scope="service",
+                action="start",
+                phase="failed",
+                service_id=self.get_id(),
+                error=exc,
+            )
+            raise
+        self._emit_event(
+            scope="service",
+            action="start",
+            phase="after",
+            service_id=self.get_id(),
+        )
     
     def stop(self):
         """Stop the local systemd service."""
-        for service_name in self._get_systemd_services():
-            self.subprocess_run(["systemctl", "stop", service_name])
+        self._emit_event(
+            scope="service",
+            action="stop",
+            phase="before",
+            service_id=self.get_id(),
+        )
+        try:
+            for service_name in self._get_systemd_services():
+                self.subprocess_run(["systemctl", "stop", service_name])
+        except Exception as exc:
+            self._emit_event(
+                scope="service",
+                action="stop",
+                phase="failed",
+                service_id=self.get_id(),
+                error=exc,
+            )
+            raise
+        self._emit_event(
+            scope="service",
+            action="stop",
+            phase="after",
+            service_id=self.get_id(),
+        )
 
     def restart(self):
         """Restart the local systemd service."""
+        self._emit_event(
+            scope="service",
+            action="restart",
+            phase="before",
+            service_id=self.get_id(),
+        )
         self.stop()
         self.vpn.stop_serving_https(self.service.metadata.runtime.ports.webui)
         self.start()
         time.sleep(self.restart_delay)
         self.vpn.serve_https(self.service.metadata.runtime.ports.webui)
+        self._emit_event(
+            scope="service",
+            action="restart",
+            phase="after",
+            service_id=self.get_id(),
+            payload={"serve_https": True},
+        )
     
     def status(self)-> ServiceStatus:
         """Check the status of the local systemd service and return a ServiceStatus object."""
