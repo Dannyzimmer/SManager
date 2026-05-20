@@ -14,7 +14,7 @@ class BaseGlobalManager:
         self.services_dir = services_dir
         self.global_config = global_config
         self.vpn = vpn
-        self.crawler = ServiceDiscoverer(services_dir)
+        self.crawler = ServiceDiscoverer(services_dir, global_config.metadata_filename)
         self.services = self.discover_services()
 
     def discover_services(self) -> list[Service]:

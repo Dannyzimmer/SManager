@@ -6,7 +6,7 @@ import os
 from ..datatypes import ServiceMetadata, Service
 
 class ServiceDiscoverer:
-    def __init__(self, directory: str, searched_filename: str = "sd_info.json"):
+    def __init__(self, directory: str, searched_filename: str):
         self.directory = directory
         self.searched_filename = searched_filename
 

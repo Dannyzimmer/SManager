@@ -6,11 +6,14 @@ from ..config import DEFAULT_CONFIG_DIR, DEFAULT_CONFIG_PATH, resolve_config_pat
 
 _TEMPLATE = """\
 global:
-  # Absolute path to the directory where service sd_info.json files live.
+  # Absolute path to the directory where service metadata files in JSON live.
   services_dir: "/path/to/your/services"
 
   # VPN provider to use. Must match a registered provider (e.g. "tailscale").
   vpn_provider: "tailscale"
+
+  # Filename for service metadata files. Each service should have a metadata file with this name in its directory.
+  metadata_filename: "sd_info.yaml"
 """
 
 
