@@ -65,10 +65,13 @@ class LocalSection:
 @dataclass
 class VPNSection:
     serve_https: bool = False
+    https_restart_delay: int = 5
 
     def __post_init__(self):
         if not isinstance(self.serve_https, bool):
             raise ValueError("VPNSection 'serve_https' field must be a boolean.")
+        if not isinstance(self.https_restart_delay, int) or self.https_restart_delay < 0:
+            raise ValueError("VPNSection 'https_restart_delay' field must be a non-negative integer.")
 
 @dataclass
 class ServiceMetadata:

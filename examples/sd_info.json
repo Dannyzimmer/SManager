@@ -23,7 +23,8 @@
         "systemd_services":["sonarr"]
     },
     "vpn":{
-        "serve_https":true
+        "serve_https":true,
+        "https_restart_delay":5
     },
     "depends_on":["qbittorrent"]
 }

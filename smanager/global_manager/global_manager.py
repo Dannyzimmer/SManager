@@ -21,18 +21,19 @@ class GlobalManager(BaseGlobalManager):
 
     def get_service_manager(self, service: Service, restart_delay: int = 5) -> BaseManager:
         """Get the appropriate service manager for the given service based on its metadata."""
+        delay = service.metadata.vpn.https_restart_delay if service.metadata.vpn and service.metadata.vpn.https_restart_delay is not None else restart_delay
         if service.metadata.runtime.type == "docker":
             return DockerManager(
                 service,
                 self.vpn,
-                restart_delay=restart_delay,
+                restart_delay=delay,
                 event_dispatcher=self.event_dispatcher,
             )
         elif service.metadata.runtime.type == "local":
             return LocalManager(
                 service,
                 vpn=self.vpn,
-                restart_delay=restart_delay,
+                restart_delay=delay,
                 event_dispatcher=self.event_dispatcher,
             )
         else:
