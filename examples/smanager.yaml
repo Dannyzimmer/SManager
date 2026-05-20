@@ -1,3 +1,9 @@
 global:
+  # Absolute path to the directory where service metadata files in JSON live.
   services_dir: "/path/to/your/services"
 
+  # VPN provider to use. Must match a registered provider (e.g. "tailscale").
+  vpn_provider: "tailscale"
+
+  # Filename for service metadata files. Each service should have a metadata file with this name in its directory.
+  metadata_filename: "sd_info.yaml"
