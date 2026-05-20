@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from typing import Any, Iterable
@@ -409,3 +410,166 @@ class MetadataWizard:
         if len(values) <= 3:
             return ", ".join(values)
         return f"{len(values)} selected"
+
+
+class MetadataEditor(MetadataWizard):
+    def __init__(self, metadata_path: Path | None = None, console: Console | None = None):
+        super().__init__(output_override=None, console=console)
+        self.metadata_path = metadata_path
+
+    def run(self) -> Path:
+        target_path = self._resolve_metadata_path()
+        metadata_dict = self._load_metadata_dict(target_path)
+        ServiceMetadata.from_dict(metadata_dict)
+        original_json = json.dumps(metadata_dict, sort_keys=True)
+
+        self.console.print(
+            Panel.fit(
+                f"[bold cyan]Metadata Editor[/]\n"
+                f"[dim]Editing {target_path}. Choose sections and save when ready.[/]",
+                title="smanager metadata edit",
+            )
+        )
+
+        while True:
+            section = self._ask_select(
+                "Edit section",
+                [
+                    "Identity",
+                    "Runtime",
+                    "Runtime details",
+                    "Groups",
+                    "Depends on",
+                    "VPN",
+                    "Active",
+                    "Save and exit",
+                    "Exit without saving",
+                ],
+                "Identity",
+            )
+
+            if section == "Identity":
+                self._edit_identity(metadata_dict)
+            elif section == "Runtime":
+                self._edit_runtime(metadata_dict)
+            elif section == "Runtime details":
+                self._edit_runtime_details(metadata_dict)
+            elif section == "Groups":
+                self._edit_groups(metadata_dict, target_path)
+            elif section == "Depends on":
+                self._edit_dependencies(metadata_dict, target_path)
+            elif section == "VPN":
+                self._edit_vpn(metadata_dict)
+            elif section == "Active":
+                metadata_dict["active"] = self._ask_confirm("Enable service", bool(metadata_dict.get("active", True)))
+            elif section == "Save and exit":
+                break
+            elif section == "Exit without saving":
+                self.console.print("[yellow]No changes written.[/]")
+                return target_path
+
+        metadata = ServiceMetadata.from_dict(metadata_dict)
+        self._render_review(metadata, target_path.parent, target_path.name)
+
+        if not self._ask_confirm("Save changes", True):
+            raise click.ClickException("Cancelled by user.")
+
+        if json.dumps(metadata_dict, sort_keys=True) == original_json:
+            self.console.print("[yellow]No changes detected.[/]")
+            return target_path
+
+        metadata.write_to_json(str(target_path))
+        self.console.print(f"[green]✓ Metadata saved to {target_path}[/]")
+        return target_path
+
+    def _resolve_metadata_path(self) -> Path:
+        if self.metadata_path is not None:
+            target_path = self.metadata_path.expanduser()
+        else:
+            candidates = self._discover_metadata_files(Path.cwd())
+            if not candidates:
+                raise click.ClickException("No metadata files found (expected sd_info.*).")
+            if len(candidates) == 1:
+                target_path = candidates[0]
+            else:
+                default_choice = str(candidates[0])
+                selected = self._ask_select("Metadata file", [str(path) for path in candidates], default_choice)
+                target_path = Path(selected)
+
+        if not target_path.is_file():
+            raise click.ClickException(f"Metadata file not found: {target_path}")
+        return target_path
+
+    def _discover_metadata_files(self, root: Path) -> list[Path]:
+        return sorted(path for path in root.rglob("sd_info.*") if path.is_file())
+
+    def _load_metadata_dict(self, path: Path) -> dict[str, Any]:
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise click.ClickException(f"Invalid JSON metadata file: {path}") from exc
+
+    def _edit_identity(self, metadata_dict: dict[str, Any]) -> None:
+        metadata_dict["name"] = self._ask_text("Service name", str(metadata_dict.get("name", "")))
+        metadata_dict["description"] = self._ask_text("Description", str(metadata_dict.get("description", "")))
+        metadata_dict["id"] = self._ask_text("Service id", str(metadata_dict.get("id", "")))
+
+    def _edit_runtime(self, metadata_dict: dict[str, Any]) -> None:
+        runtime = metadata_dict.setdefault("runtime", {})
+        runtime_type = self._ask_select("Runtime type", ["docker", "local"], str(runtime.get("type", "local")))
+        runtime["type"] = runtime_type
+
+        ports = runtime.setdefault("ports", {})
+        ports["webui"] = self._ask_int("Web UI port", int(ports.get("webui", 8080)))
+        runtime["sys_user"] = self._ask_text("System user", str(runtime.get("sys_user", metadata_dict.get("id", "service"))))
+        runtime["sys_group"] = self._ask_text("System group", str(runtime.get("sys_group", metadata_dict.get("id", "service"))))
+
+        if runtime_type == "docker":
+            metadata_dict.pop("local", None)
+            metadata_dict.setdefault("docker", {"compose_file": "compose.yaml", "containers": None})
+        else:
+            metadata_dict.pop("docker", None)
+            service_id = str(metadata_dict.get("id", "service"))
+            metadata_dict.setdefault(
+                "local",
+                {
+                    "installation_path": f"/opt/{service_id}",
+                    "appdata_path": f"/var/lib/{service_id}",
+                    "systemd_services": [service_id],
+                },
+            )
+
+    def _edit_runtime_details(self, metadata_dict: dict[str, Any]) -> None:
+        runtime_type = metadata_dict.get("runtime", {}).get("type", "local")
+        if runtime_type == "docker":
+            docker = metadata_dict.setdefault("docker", {})
+            docker["compose_file"] = self._ask_text("Compose file", str(docker.get("compose_file", "compose.yaml")))
+            containers = docker.get("containers") or []
+            containers_csv = ", ".join(containers)
+            parsed = parse_csv(self._ask_text("Containers (comma-separated)", containers_csv))
+            docker["containers"] = parsed or None
+            return
+
+        local = metadata_dict.setdefault("local", {})
+        service_id = str(metadata_dict.get("id", "service"))
+        local["installation_path"] = self._ask_text("Installation path", str(local.get("installation_path", f"/opt/{service_id}")))
+        local["appdata_path"] = self._ask_text("Appdata path", str(local.get("appdata_path", f"/var/lib/{service_id}")))
+        services = local.get("systemd_services") or [service_id]
+        parsed_services = parse_csv(self._ask_text("Systemd services (comma-separated)", ", ".join(services)))
+        local["systemd_services"] = parsed_services or [service_id]
+
+    def _edit_groups(self, metadata_dict: dict[str, Any], target_path: Path) -> None:
+        current = metadata_dict.get("groups") or []
+        available = sorted(set(self._existing_groups(target_path.parent) + current))
+        metadata_dict["groups"] = self._ask_groups(available) or None
+
+    def _edit_dependencies(self, metadata_dict: dict[str, Any], target_path: Path) -> None:
+        service_id = str(metadata_dict.get("id", ""))
+        current = metadata_dict.get("depends_on") or []
+        available = sorted(set(self._existing_dependencies(target_path.parent, service_id) + current) - {service_id})
+        metadata_dict["depends_on"] = self._ask_dependencies(available) or None
+
+    def _edit_vpn(self, metadata_dict: dict[str, Any]) -> None:
+        vpn = metadata_dict.setdefault("vpn", {})
+        vpn["serve_https"] = self._ask_confirm("Serve HTTPS through VPN", bool(vpn.get("serve_https", False)))
+        vpn["https_restart_delay"] = self._ask_int("HTTPS restart delay", int(vpn.get("https_restart_delay", 5)))
