@@ -5,10 +5,23 @@ Defines the interface and common functionality for managing a single service.
 
 from abc import abstractmethod
 from ..datatypes import ServiceStatus
+import subprocess
 
 class BaseManager:
     def __init__(self, config):
         self.config = config
+
+    def subprocess_run(self, command: list) -> subprocess.CompletedProcess:
+        """Helper method to run a subprocess command and handle errors."""
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, check=True)
+            return result
+        except subprocess.CalledProcessError as e:
+            print(f"Error running command: {' '.join(command)}")
+            print(f"Return code: {e.returncode}")
+            print(f"Output: {e.output}")
+            print(f"Error output: {e.stderr}")
+            raise
 
     @abstractmethod
     def start(self):
