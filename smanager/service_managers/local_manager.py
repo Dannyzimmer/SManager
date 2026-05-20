@@ -2,6 +2,7 @@ from . import BaseSDV2Manager
 from ..datatypes import Service
 from ..vpn import VPNService
 import time
+import subprocess
 from ..datatypes import ServiceStatus, SingleStatus
 
 class LocalManager(BaseSDV2Manager):
@@ -105,10 +106,18 @@ class LocalManager(BaseSDV2Manager):
         """Check the status of the local systemd service and return a ServiceStatus object."""
         service_statuses = []
         for service_name in self._get_systemd_services():
-            result = self.subprocess_run(["systemctl", "is-active", service_name])
+            result = subprocess.run(
+                ["systemctl", "is-active", service_name],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            status_text = result.stdout.strip() or result.stderr.strip()
+            if not status_text:
+                status_text = "active" if result.returncode == 0 else "inactive"
             status = SingleStatus(
                 name=service_name,
-                status=result.stdout.strip()
+                status=status_text
             )
             service_statuses.append(status)
         return ServiceStatus(
