@@ -147,7 +147,9 @@ class GlobalManager(BaseGlobalManager):
         """Get the status of a specific service by its ID."""
         service = self._find_service_by_id(service_id)
         manager = self.get_service_manager(service)
-        return manager.status()
+        result = manager.status()
+        result.enabled = bool(service.metadata.active)
+        return result
     
     def get_group_status(self, group_name: str) -> MultiStatus:
         """Get the status of all services in a group."""

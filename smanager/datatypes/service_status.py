@@ -10,6 +10,7 @@ class ServiceStatus:
     id: str
     type: str  # e.g. "docker", "local"
     statuses: list[SingleStatus]
+    enabled: bool = True
 
 @dataclass
 class MultiStatus:
