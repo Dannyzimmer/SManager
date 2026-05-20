@@ -1,0 +1,411 @@
+"""Interactive wizard for creating service metadata files."""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+from typing import Any, Iterable
+
+import click
+from InquirerPy import get_style, inquirer
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+
+from ..datatypes import ServiceMetadata
+
+
+KNOWN_PORTS = {
+    "sonarr": 8989,
+    "radarr": 7878,
+    "lidarr": 8686,
+    "readarr": 8787,
+    "prowlarr": 9696,
+    "bazarr": 6767,
+    "jellyfin": 8096,
+    "plex": 32400,
+    "qbittorrent": 8080,
+    "qbit": 8080,
+}
+
+COMPOSE_CANDIDATES = (
+    "compose.yaml",
+    "compose.yml",
+    "docker-compose.yml",
+    "docker-compose.yaml",
+)
+
+ADD_NEW_GROUP_LABEL = "Add new group..."
+
+
+def slugify(value: str) -> str:
+    value = value.strip().lower()
+    value = re.sub(r"[^a-z0-9]+", "-", value)
+    value = re.sub(r"-+", "-", value).strip("-")
+    return value or "service"
+
+
+def parse_csv(value: str) -> list[str]:
+    if not value.strip():
+        return []
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def unique_id(base_id: str, existing_ids: Iterable[str]) -> str:
+    existing = set(existing_ids)
+    candidate = base_id
+    suffix = 2
+    while candidate in existing:
+        candidate = f"{base_id}-{suffix}"
+        suffix += 1
+    return candidate
+
+
+def infer_webui_port(service_name: str) -> int:
+    normalized = slugify(service_name)
+    if normalized in KNOWN_PORTS:
+        return KNOWN_PORTS[normalized]
+    for key, port in KNOWN_PORTS.items():
+        if key in normalized:
+            return port
+    return 8080
+
+
+def find_compose_file(service_dir: Path) -> str:
+    for candidate in COMPOSE_CANDIDATES:
+        if (service_dir / candidate).is_file():
+            return candidate
+    return "compose.yaml"
+
+
+def infer_runtime_type(service_dir: Path) -> str:
+    for candidate in COMPOSE_CANDIDATES:
+        if (service_dir / candidate).is_file():
+            return "docker"
+    return "local"
+
+
+def discover_existing_metadata(service_root: Path) -> tuple[list[str], list[str], list[str]]:
+    existing_ids: list[str] = []
+    groups: list[str] = []
+    dependencies: list[str] = []
+
+    if not service_root.exists():
+        return existing_ids, groups, dependencies
+
+    for metadata_path in service_root.rglob("sd_info.*"):
+        try:
+            with metadata_path.open("r", encoding="utf-8") as handle:
+                metadata = ServiceMetadata.from_json(handle.read())
+        except Exception:
+            continue
+
+        existing_ids.append(metadata.id)
+        if metadata.groups:
+            groups.extend(metadata.groups)
+        if metadata.depends_on:
+            dependencies.extend(metadata.depends_on)
+
+    return sorted(set(existing_ids)), sorted(set(groups)), sorted(set(dependencies))
+
+
+class MetadataWizard:
+    def __init__(self, output_override: Path | None = None, console: Console | None = None):
+        self.output_override = output_override
+        self.console = console or Console()
+        self.prompt_style = get_style(
+            {
+                "questionmark": "bold white",
+                "answermark": "bold green",
+                "question": "bold white",
+                "answered_question": "bold white",
+                "answer": "bold green",
+                "instruction": "bold green",
+                "long_instruction": "bold green",
+                "pointer": "bold green",
+                "marker": "bold green",
+                "checkbox": "bold green",
+            }
+        )
+
+    def run(self) -> Path:
+        self.console.print(
+            Panel.fit(
+                "[bold cyan]Service Metadata Wizard[/]\n"
+                "[dim]Create an sd_info.json file interactively. Press Enter to accept defaults.[/]",
+                title="smanager metadata init",
+            )
+        )
+
+        service_name = self._ask_text("Service name", self._default_service_name())
+
+        base_id = slugify(service_name)
+        service_dir = self._resolve_service_dir(self._ask_text("Service directory", self._default_service_dir_display()))
+
+        existing_ids, _, _ = discover_existing_metadata(service_dir.parent)
+        service_id = unique_id(base_id, existing_ids)
+
+        metadata_filename = self._ask_text("Metadata filename", self._default_metadata_filename())
+        runtime_type = self._ask_select(
+            "Runtime type",
+            choices=["docker", "local"],
+            default=infer_runtime_type(service_dir),
+        )
+
+        description = self._ask_text("Description", f"{service_name} service")
+        webui_port = self._ask_int("Web UI port", infer_webui_port(service_name))
+        sys_user = self._ask_text("System user", service_id)
+        sys_group = self._ask_text("System group", service_id)
+
+        docker_section = None
+        local_section = None
+        if runtime_type == "docker":
+            compose_file = self._ask_text("Compose file", find_compose_file(service_dir))
+            containers = parse_csv(self._ask_text("Containers (comma-separated)", ""))
+            docker_section = {
+                "compose_file": compose_file,
+                "containers": containers or None,
+            }
+        else:
+            installation_path = self._ask_text("Installation path", f"/opt/{service_id}")
+            appdata_path = self._ask_text("Appdata path", f"/var/lib/{service_id}")
+            systemd_services = parse_csv(self._ask_text("Systemd services (comma-separated)", service_id))
+            local_section = {
+                "installation_path": installation_path,
+                "appdata_path": appdata_path,
+                "systemd_services": systemd_services or [service_id],
+            }
+
+        available_groups = self._existing_groups(service_dir)
+        available_dependencies = self._existing_dependencies(service_dir, service_id)
+        groups = self._ask_groups(available_groups)
+        depends_on = self._ask_dependencies(available_dependencies)
+
+        serve_https = self._ask_confirm("Serve HTTPS through VPN", False)
+        https_restart_delay = self._ask_int("HTTPS restart delay", 5)
+        active = self._ask_confirm("Enable service", True)
+
+        metadata_dict = {
+            "name": service_name,
+            "description": description,
+            "schema_version": 2,
+            "id": service_id,
+            "active": active,
+            "runtime": {
+                "type": runtime_type,
+                "ports": {"webui": webui_port},
+                "sys_user": sys_user,
+                "sys_group": sys_group,
+            },
+            "groups": groups or None,
+            "depends_on": depends_on or None,
+            "vpn": {
+                "serve_https": serve_https,
+                "https_restart_delay": https_restart_delay,
+            },
+        }
+
+        if docker_section is not None:
+            metadata_dict["docker"] = docker_section
+        if local_section is not None:
+            metadata_dict["local"] = local_section
+
+        metadata = ServiceMetadata.from_dict(metadata_dict)
+        self._render_review(metadata, service_dir, metadata_filename)
+
+        if not self._ask_confirm("Continue", True):
+            raise click.ClickException("Cancelled by user.")
+
+        output_path = self._resolve_output_path(service_dir, metadata_filename)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        if output_path.exists() and not self._ask_confirm(f"{output_path} already exists. Overwrite", False):
+            raise click.ClickException("Cancelled by user.")
+
+        metadata.write_to_json(str(output_path))
+        self.console.print(f"[green]✓ Metadata saved to {output_path}[/]")
+        return output_path
+
+    def _ask_text(self, label: str, default: str) -> str:
+        message = self._inline_prompt_message(label, default)
+        return inquirer.text(
+            message=message,
+            default="",
+            mandatory=False,
+            transformer=lambda value: value or default,
+            filter=lambda value: value or default,
+            **self._prompt_config(),
+        ).execute()
+
+    def _ask_int(self, label: str, default: int) -> int:
+        message = self._inline_prompt_message(label, default)
+        value = inquirer.number(
+            message=message,
+            default=None,
+            float_allowed=False,
+            replace_mode=True,
+            mandatory=False,
+            transformer=lambda value: str(default if value == "" else value),
+            filter=lambda value: default if value == "" else int(value),
+            **self._prompt_config(),
+        ).execute()
+        return int(value)
+
+    def _ask_confirm(self, label: str, default: bool) -> bool:
+        message = self._inline_prompt_message(label, "yes" if default else "no")
+        return bool(
+            inquirer.confirm(
+                message=message,
+                default=default,
+                transformer=lambda value: "yes" if value else "no",
+                instruction="(y/n)",
+                **self._prompt_config(),
+            ).execute()
+        )
+
+    def _ask_select(self, label: str, choices: list[str], default: str) -> str:
+        if default not in choices:
+            default = choices[0]
+        message = self._inline_prompt_message(label, default)
+        return inquirer.select(
+            message=message,
+            choices=choices,
+            default=default,
+            instruction="[Use arrows to move]",
+            **self._prompt_config(),
+        ).execute()
+
+    def _ask_checkbox(self, label: str, choices: list[str], default: list[str] | None = None) -> list[str]:
+        message = self._inline_prompt_message(label, default)
+        return inquirer.checkbox(
+            message=message,
+            choices=choices,
+            default=default or [],
+            instruction="[Use arrows to move, space to select]",
+            transformer=self._format_checkbox_answer,
+            **self._prompt_config(),
+        ).execute()
+
+    def _ask_groups(self, available_groups: list[str]) -> list[str]:
+        if not available_groups:
+            selected = self._ask_checkbox("Groups", [ADD_NEW_GROUP_LABEL])
+        else:
+            choices = list(dict.fromkeys(available_groups)) + [ADD_NEW_GROUP_LABEL]
+            default = available_groups[:2]
+            selected = self._ask_checkbox("Groups", choices, default)
+
+        groups = [group for group in selected if group != ADD_NEW_GROUP_LABEL]
+        choices = list(dict.fromkeys(available_groups)) + [ADD_NEW_GROUP_LABEL]
+
+        while ADD_NEW_GROUP_LABEL in selected:
+            new_group = self._ask_text("New group name", "").strip()
+            if not new_group:
+                break
+            if new_group not in choices:
+                choices.insert(len(choices) - 1, new_group)
+            if new_group not in groups:
+                groups.append(new_group)
+            selected = self._ask_checkbox("Groups", choices, groups)
+            groups = [group for group in selected if group != ADD_NEW_GROUP_LABEL]
+
+        return self._dedupe(groups)
+
+    def _ask_dependencies(self, available_dependencies: list[str]) -> list[str]:
+        if not available_dependencies:
+            self.console.print("[dim]No existing services found, leaving dependencies empty.[/]")
+            return []
+        default = available_dependencies[:3]
+        selected = self._ask_checkbox("Depends on", available_dependencies, default)
+        return self._dedupe(selected)
+
+    def _existing_groups(self, service_dir: Path) -> list[str]:
+        _, groups, _ = discover_existing_metadata(service_dir.parent)
+        return groups
+
+    def _existing_dependencies(self, service_dir: Path, current_service_id: str) -> list[str]:
+        ids, _, dependencies = discover_existing_metadata(service_dir.parent)
+        combined = sorted(set(ids + dependencies) - {current_service_id})
+        return combined
+
+    def _default_service_name(self) -> str:
+        if self.output_override is not None:
+            return slugify(self.output_override.parent.name)
+        return slugify(Path.cwd().name)
+
+    def _default_service_dir_display(self) -> str:
+        return "."
+
+    def _resolve_service_dir(self, value: str) -> Path:
+        if value.strip() == ".":
+            return Path.cwd()
+        return Path(value).expanduser()
+
+    def _default_metadata_filename(self) -> str:
+        if self.output_override is not None:
+            return self.output_override.name
+        return "sd_info.json"
+
+    def _resolve_output_path(self, service_dir: Path, metadata_filename: str) -> Path:
+        if self.output_override is not None:
+            return self.output_override
+        return service_dir / metadata_filename
+
+    def _render_review(self, metadata: ServiceMetadata, service_dir: Path, metadata_filename: str) -> None:
+        table = Table(title="Review", header_style="bold cyan", show_lines=False)
+        table.add_column("Field", style="bold")
+        table.add_column("Value")
+
+        runtime = metadata.runtime.type
+        runtime_details = f"{runtime} ({metadata.runtime.sys_user}/{metadata.runtime.sys_group}, port {metadata.runtime.ports.webui})"
+        table.add_row("ID", metadata.id)
+        table.add_row("Name", metadata.name)
+        table.add_row("Description", metadata.description)
+        table.add_row("Runtime", runtime_details)
+        table.add_row("Service dir", str(service_dir))
+        table.add_row("Metadata file", metadata_filename)
+        table.add_row("Groups", ", ".join(metadata.groups or []) or "-")
+        table.add_row("Depends on", ", ".join(metadata.depends_on or []) or "-")
+        table.add_row("VPN", f"serve_https={metadata.vpn.serve_https}, delay={metadata.vpn.https_restart_delay}")
+
+        if metadata.docker is not None:
+            table.add_row("Docker compose", metadata.docker.compose_file or "-")
+            table.add_row("Containers", ", ".join(metadata.docker.containers or []) or "-")
+        if metadata.local is not None:
+            table.add_row("Installation path", metadata.local.installation_path or "-")
+            table.add_row("Appdata path", metadata.local.appdata_path or "-")
+            table.add_row("Systemd services", ", ".join(metadata.local.systemd_services or []) or "-")
+
+        table.add_row("Active", "yes" if metadata.active else "no")
+        self.console.print(table)
+
+    def _dedupe(self, values: list[str]) -> list[str]:
+        deduped: list[str] = []
+        for value in values:
+            if value not in deduped:
+                deduped.append(value)
+        return deduped
+
+    def _inline_prompt_message(self, label: str, default: object | None = None) -> str:
+        if default in (None, ""):
+            return label
+        if isinstance(default, list):
+            if not default:
+                return label
+            default_text = ", ".join(default)
+        else:
+            default_text = str(default)
+        return f"{label} ({default_text})"
+
+    def _prompt_config(self) -> dict[str, Any]:
+        return {
+            "style": self.prompt_style,
+            "qmark": "?",
+            "amark": "✓",
+            "raise_keyboard_interrupt": True,
+        }
+
+    def _format_checkbox_answer(self, values: list[str]) -> str:
+        if not values:
+            return "none"
+        if len(values) <= 3:
+            return ", ".join(values)
+        return f"{len(values)} selected"

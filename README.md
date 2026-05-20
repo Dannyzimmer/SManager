@@ -8,3 +8,8 @@
 - Easy configuration using YAML files.
 - Extensible architecture for adding new service types and VPN providers.
 
+## Interactive Metadata Wizard
+- Create a new service metadata file with `smanager metadata init`.
+- The wizard is interactive, shows defaults in context, and only asks Docker-specific or local-specific fields depending on the runtime you choose.
+- It uses Rich for a guided terminal experience and validates the generated metadata before saving it.
+

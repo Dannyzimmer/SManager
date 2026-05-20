@@ -1,7 +1,6 @@
 import click
 
-from .commands import all_cmd, dependency_cmd, group_cmd, service_cmd, status_cmd
-from .commands import all_cmd, config_cmd, dependency_cmd, group_cmd, service_cmd, status_cmd
+from .commands import all_cmd, config_cmd, dependency_cmd, group_cmd, metadata_cmd, service_cmd, status_cmd
 
 
 @click.group()
@@ -28,3 +27,4 @@ cli.add_command(dependency_cmd, "dependency")
 cli.add_command(all_cmd, "all")
 cli.add_command(status_cmd, "status")
 cli.add_command(config_cmd, "config")
+cli.add_command(metadata_cmd, "metadata")

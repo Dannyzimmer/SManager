@@ -10,6 +10,7 @@ dependencies = [
     "PyYAML>=6.0",
     "click>=8.0",
     "rich>=13.0",
+    "InquirerPy>=0.3.4",
 ]
 
 [tool.setuptools.dynamic]
