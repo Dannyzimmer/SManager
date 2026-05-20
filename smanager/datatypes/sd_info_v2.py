@@ -61,6 +61,14 @@ class LocalSection:
             appdata_path=data.get('appdata_path'),
             systemd_services=data.get('systemd_services')
         )
+    
+@dataclass
+class VPNSection:
+    serve_https: bool = False
+
+    def __post_init__(self):
+        if not isinstance(self.serve_https, bool):
+            raise ValueError("VPNSection 'serve_https' field must be a boolean.")
 
 @dataclass
 class ServiceMetadata:
@@ -73,6 +81,7 @@ class ServiceMetadata:
     groups: Optional[list] = None
     docker: Optional[DockerSection] = None
     local: Optional[LocalSection] = None
+    vpn: Optional[VPNSection] = None
     depends_on: Optional[list] = None
 
     def __post_init__(self):
@@ -138,6 +147,9 @@ class ServiceMetadata:
         local_data = data.get('local')
         local = LocalSection.from_dict(local_data) if local_data is not None else None
 
+        vpn_data = data.get('vpn')
+        vpn = VPNSection(**vpn_data) if vpn_data is not None else None
+
         return cls(
             name=data.get('name'),
             description=data.get('description'),
@@ -148,6 +160,7 @@ class ServiceMetadata:
             runtime=runtime,
             docker=docker,
             local=local,
+            vpn=vpn,
             depends_on=data.get('depends_on')
         )
     

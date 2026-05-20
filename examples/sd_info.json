@@ -22,5 +22,8 @@
         "appdata_path":"/var/lib/sonarr",
         "systemd_services":["sonarr"]
     },
+    "vpn":{
+        "serve_https":true
+    },
     "depends_on":["qbittorrent"]
 }
