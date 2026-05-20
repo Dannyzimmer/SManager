@@ -2,14 +2,59 @@
 > A simple server manager for self-hosted services, with VPN integration and support for both local and Docker-based services.
 
 ## Features
-- Manage local services and Docker containers with a unified interface.
-- Integrate with Tailscale VPN for secure remote access.
-- Monitor service status and logs in real-time.
-- Easy configuration using YAML files.
-- Extensible architecture for adding new service types and VPN providers.
+- Unified service management for local/systemd and Docker runtimes.
+- VPN integration (Tailscale provider support).
+- Interactive metadata creation and editing.
+- YAML-based global configuration.
 
-## Interactive Metadata Wizard
-- Create a new service metadata file with `smanager metadata init`.
-- The wizard is interactive, shows defaults in context, and only asks Docker-specific or local-specific fields depending on the runtime you choose.
-- It uses Rich for a guided terminal experience and validates the generated metadata before saving it.
+## CLI Usage
+Use this command pattern:
+
+```bash
+smanager <group> <command> [options]
+```
+
+Discover available commands at any level:
+
+```bash
+smanager --help
+smanager <group> --help
+smanager <group> <command> --help
+```
+
+## Metadata Commands
+The `metadata` group provides interactive workflows for service metadata files.
+
+### Create Metadata
+```bash
+smanager metadata init
+```
+
+Optional output override:
+
+```bash
+smanager metadata init --output /path/to/sd_info.json
+```
+
+### Edit Existing Metadata
+```bash
+smanager metadata edit
+```
+
+Edit a specific file directly:
+
+```bash
+smanager metadata edit --file /path/to/sd_info.json
+```
+
+Behavior summary:
+- Interactive prompts with inline defaults.
+- Runtime-aware sections (Docker vs Local).
+- Multi-select support for `groups` and `depends_on`.
+- Validation before writing changes.
+
+## Notes
+- `metadata init` creates a new file.
+- `metadata edit` modifies an existing file.
+- Use command-specific `--help` for the latest options and examples.
 
