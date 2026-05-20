@@ -4,21 +4,7 @@ import json as json_module
 import click
 
 from ..config import get_manager
-from ...datatypes import MultiStatus, ServiceStatus
-
-
-def _print_service_status(status: ServiceStatus) -> None:
-    click.echo(f"Service: {status.id}  [{status.type}]")
-    for s in status.statuses:
-        marker = "●" if s.status in ("running", "active") else "○"
-        click.echo(f"  {marker} {s.name}: {s.status}")
-
-
-def _print_multi_status(multi: MultiStatus) -> None:
-    for i, svc in enumerate(multi.services):
-        if i > 0:
-            click.echo("")
-        _print_service_status(svc)
+from ..formatters import render_status_table
 
 
 @click.command()
@@ -69,7 +55,7 @@ def status_cmd(
             if as_json:
                 click.echo(json_module.dumps(dataclasses.asdict(result), indent=2))
             else:
-                _print_service_status(result)
+                render_status_table(result)
         else:
             if group_name:
                 result = manager.get_group_status(group_name)
@@ -80,6 +66,6 @@ def status_cmd(
             if as_json:
                 click.echo(json_module.dumps(dataclasses.asdict(result), indent=2))
             else:
-                _print_multi_status(result)
+                render_status_table(result)
     except ValueError as e:
         raise click.ClickException(str(e))
