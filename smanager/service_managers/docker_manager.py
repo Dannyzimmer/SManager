@@ -27,6 +27,8 @@ class DockerManager(BaseSDV2Manager):
     
     def start(self):
         """Start the Docker service using docker compose."""
+        if not self.service.metadata.active:
+            return # Don't start if the service is not active
         compose_file = self._get_compose_file_path()
         self.subprocess_run(["docker", "compose", "-f", compose_file, "up", "-d"])
 

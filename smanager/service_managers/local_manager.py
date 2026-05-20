@@ -19,6 +19,8 @@ class LocalManager(BaseSDV2Manager):
 
     def start(self):
         """Start the local systemd service."""
+        if not self.service.metadata.active:
+            return # Don't start if the service is not active
         for service_name in self._get_systemd_services():
             self.subprocess_run(["systemctl", "start", service_name])
     
