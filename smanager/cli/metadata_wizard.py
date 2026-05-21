@@ -3,9 +3,16 @@
 from __future__ import annotations
 
 import json
+import getpass
+import os
 import re
 from pathlib import Path
 from typing import Any, Iterable
+
+try:
+    import grp
+except ImportError:  # pragma: no cover - non-POSIX fallback
+    grp = None
 
 import click
 from InquirerPy import get_style, inquirer
@@ -87,6 +94,22 @@ def infer_runtime_type(service_dir: Path) -> str:
     return "local"
 
 
+def current_system_user() -> str:
+    user = getpass.getuser().strip()
+    return user or "service"
+
+
+def current_system_group() -> str:
+    if grp is not None and hasattr(os, "getgid"):
+        try:
+            group_name = grp.getgrgid(os.getgid()).gr_name.strip()
+            if group_name:
+                return group_name
+        except KeyError:
+            pass
+    return current_system_user()
+
+
 def discover_existing_metadata(service_root: Path, metadata_filename: str = "sd_info.json") -> tuple[list[str], list[str], list[str]]:
     existing_ids: list[str] = []
     groups: list[str] = []
@@ -148,7 +171,7 @@ class MetadataWizard:
         existing_ids, _, _ = discover_existing_metadata(service_dir.parent, self.metadata_filename)
         service_id = unique_id(base_id, existing_ids)
 
-        metadata_filename = self._ask_text("Metadata filename", self._default_metadata_filename())
+        metadata_filename = self._default_metadata_filename()
         runtime_type = self._ask_select(
             "Runtime type",
             choices=["docker", "local"],
@@ -157,8 +180,8 @@ class MetadataWizard:
 
         description = self._ask_text("Description", f"{service_name} service")
         webui_port = self._ask_int("Web UI port", infer_webui_port(service_name))
-        sys_user = self._ask_text("System user", service_id)
-        sys_group = self._ask_text("System group", service_id)
+        sys_user = self._ask_text("System user", self._default_system_user())
+        sys_group = self._ask_text("System group", self._default_system_group())
 
         docker_section = None
         local_section = None
@@ -362,6 +385,12 @@ class MetadataWizard:
         if self.output_override is not None:
             return self.output_override.name
         return self.metadata_filename
+
+    def _default_system_user(self) -> str:
+        return current_system_user()
+
+    def _default_system_group(self) -> str:
+        return current_system_group()
 
     def _resolve_output_path(self, service_dir: Path, metadata_filename: str) -> Path:
         if self.output_override is not None:
@@ -610,11 +639,11 @@ class MetadataEditor(MetadataWizard):
                 return
 
             if field_key == "sys_user":
-                runtime["sys_user"] = self._ask_text("System user", str(runtime.get("sys_user", metadata_dict.get("id", "service"))))
+                runtime["sys_user"] = self._ask_text("System user", str(runtime.get("sys_user", self._default_system_user())))
                 return
 
             if field_key == "sys_group":
-                runtime["sys_group"] = self._ask_text("System group", str(runtime.get("sys_group", metadata_dict.get("id", "service"))))
+                runtime["sys_group"] = self._ask_text("System group", str(runtime.get("sys_group", self._default_system_group())))
                 return
 
         if section_key == "Runtime details":
@@ -732,8 +761,8 @@ class MetadataEditor(MetadataWizard):
 
         ports = runtime.setdefault("ports", {})
         ports["webui"] = self._ask_int("Web UI port", int(ports.get("webui", 8080)))
-        runtime["sys_user"] = self._ask_text("System user", str(runtime.get("sys_user", metadata_dict.get("id", "service"))))
-        runtime["sys_group"] = self._ask_text("System group", str(runtime.get("sys_group", metadata_dict.get("id", "service"))))
+        runtime["sys_user"] = self._ask_text("System user", str(runtime.get("sys_user", self._default_system_user())))
+        runtime["sys_group"] = self._ask_text("System group", str(runtime.get("sys_group", self._default_system_group())))
 
         if runtime_type == "docker":
             metadata_dict.pop("local", None)
