@@ -13,7 +13,7 @@ global:
   vpn_provider: "tailscale"
 
   # Filename for service metadata files. Each service should have a metadata file with this name in its directory.
-  metadata_filename: "sd_info.yaml"
+  metadata_filename: "sd_info.json"
 """
 
 
