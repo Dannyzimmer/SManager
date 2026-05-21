@@ -366,7 +366,10 @@ class MetadataWizard:
         table.add_row("Metadata file", metadata_filename)
         table.add_row("Groups", ", ".join(metadata.groups or []) or "-")
         table.add_row("Depends on", ", ".join(metadata.depends_on or []) or "-")
-        table.add_row("VPN", f"serve_https={metadata.vpn.serve_https}, delay={metadata.vpn.https_restart_delay}")
+        if metadata.vpn is not None:
+            table.add_row("VPN", f"serve_https={metadata.vpn.serve_https}, delay={metadata.vpn.https_restart_delay}")
+        else:
+            table.add_row("VPN", "-")
 
         if metadata.docker is not None:
             table.add_row("Docker compose", metadata.docker.compose_file or "-")
@@ -433,20 +436,11 @@ class MetadataEditor(MetadataWizard):
         )
 
         while True:
+            section_choices = self._editor_section_choices(metadata_dict)
             section = self._ask_select(
                 "Edit section",
-                [
-                    "Identity",
-                    "Runtime",
-                    "Runtime details",
-                    "Groups",
-                    "Depends on",
-                    "VPN",
-                    "Active",
-                    "Save and exit",
-                    "Exit without saving",
-                ],
-                "Identity",
+                section_choices,
+                section_choices[0],
             )
 
             if section == "Identity":
@@ -459,7 +453,7 @@ class MetadataEditor(MetadataWizard):
                 self._edit_groups(metadata_dict, target_path)
             elif section == "Depends on":
                 self._edit_dependencies(metadata_dict, target_path)
-            elif section == "VPN":
+            elif section.startswith("VPN"):
                 self._edit_vpn(metadata_dict)
             elif section == "Active":
                 metadata_dict["active"] = self._ask_confirm("Enable service", bool(metadata_dict.get("active", True)))
@@ -482,6 +476,20 @@ class MetadataEditor(MetadataWizard):
         metadata.write_to_json(str(target_path))
         self.console.print(f"[green]✓ Metadata saved to {target_path}[/]")
         return target_path
+
+    def _editor_section_choices(self, metadata_dict: dict[str, Any]) -> list[str]:
+        vpn_label = "VPN" if metadata_dict.get("vpn") is not None else "VPN (missing)"
+        return [
+            "Identity",
+            "Runtime",
+            "Runtime details",
+            "Groups",
+            "Depends on",
+            vpn_label,
+            "Active",
+            "Save and exit",
+            "Exit without saving",
+        ]
 
     def _resolve_metadata_path(self) -> Path:
         if self.metadata_path is not None:
