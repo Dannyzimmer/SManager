@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 
 @dataclass
 class GlobalConfig:
-    services_dir: str
+    services_root: str
     vpn_provider: str = field(default="tailscale")
     metadata_filename: str = field(default="sd_info.json")
 
@@ -14,7 +14,7 @@ class GlobalConfig:
             data = yaml.safe_load(yaml_str)
             global_data = data.get('global', {})
             return cls(
-                services_dir=global_data.get('services_dir', ''),
+                services_root=global_data.get('services_root', ''),
                 vpn_provider=global_data.get('vpn_provider', 'tailscale'),
                 metadata_filename=global_data.get('metadata_filename', 'sd_info.json')
             )

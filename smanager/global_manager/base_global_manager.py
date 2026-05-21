@@ -11,11 +11,11 @@ class BaseGlobalManager:
     actual logic. Subclasses should implement the specific logic for managing services.
     """
 
-    def __init__(self, services_dir: str, global_config: GlobalConfig, vpn: VPNService):
-        self.services_dir = services_dir
+    def __init__(self, services_root: str, global_config: GlobalConfig, vpn: VPNService):
+        self.services_root = services_root
         self.global_config = global_config
         self.vpn = vpn
-        self.crawler = ServiceDiscoverer(services_dir, global_config.metadata_filename)
+        self.crawler = ServiceDiscoverer(services_root, global_config.metadata_filename)
         self.services = self.discover_services()
         self.event_dispatcher = ManagerEventDispatcher()
 

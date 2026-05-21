@@ -1,6 +1,6 @@
 global:
   # Absolute path to the directory where service metadata files in JSON live.
-  services_dir: "/path/to/your/services"
+  services_root: "/path/to/your/services"
 
   # VPN provider to use. Must match a registered provider (e.g. "tailscale").
   vpn_provider: "tailscale"

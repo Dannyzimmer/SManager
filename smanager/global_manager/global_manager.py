@@ -9,8 +9,8 @@ class GlobalManager(BaseGlobalManager):
     service metadata.
     """
 
-    def __init__(self, services_dir: str, global_config: GlobalConfig, vpn: VPNService):
-        super().__init__(services_dir, global_config, vpn)
+    def __init__(self, services_root: str, global_config: GlobalConfig, vpn: VPNService):
+        super().__init__(services_root, global_config, vpn)
 
     def _find_service_by_id(self, service_id: str) -> Service:
         """Helper method to find a service by its unique identifier."""

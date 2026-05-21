@@ -52,11 +52,11 @@ def build_manager(config_path: str | None) -> GlobalManager:
             config = GlobalConfig.from_yaml(f.read())
         except ValueError as e:
             raise click.ClickException(str(e))
-    if not config.services_dir:
-        raise click.ClickException("'services_dir' is not set in the config file.")
-    if not os.path.isdir(config.services_dir):
+    if not config.services_root:
+        raise click.ClickException("'services_root' is not set in the config file.")
+    if not os.path.isdir(config.services_root):
         raise click.ClickException(
-            f"services_dir does not exist: {config.services_dir}"
+            f"services_root does not exist: {config.services_root}"
         )
     try:
         vpn_cls = get_vpn(config.vpn_provider)
@@ -66,7 +66,7 @@ def build_manager(config_path: str | None) -> GlobalManager:
             f"Unknown VPN provider '{config.vpn_provider}': {e}"
         )
     try:
-        return GlobalManager(config.services_dir, config, vpn)
+        return GlobalManager(config.services_root, config, vpn)
     except ValueError as e:
         raise click.ClickException(str(e)) from e
 

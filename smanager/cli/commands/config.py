@@ -1,20 +1,26 @@
 import os
+import textwrap
 
 import click
 
 from ..config import DEFAULT_CONFIG_DIR, DEFAULT_CONFIG_PATH, resolve_config_path
 
-_TEMPLATE = """\
-global:
-  # Absolute path to the directory where service metadata files in JSON live.
-  services_dir: "/path/to/your/services"
 
-  # VPN provider to use. Must match a registered provider (e.g. "tailscale").
-  vpn_provider: "tailscale"
+def _render_template() -> str:
+    home = os.path.expanduser("~")
+    return textwrap.dedent(
+        f"""\
+        global:
+          # Absolute path to the directory where service metadata files in JSON live.
+          services_root: "{home}"
 
-  # Filename for service metadata files. Each service should have a metadata file with this name in its directory.
-  metadata_filename: "sd_info.json"
-"""
+          # VPN provider to use. Must match a registered provider (e.g. "tailscale").
+          vpn_provider: "tailscale"
+
+          # Filename for service metadata files. Each service should have a metadata file with this name in its directory.
+          metadata_filename: "sd_info.json"
+        """
+    )
 
 
 @click.group("config")
@@ -37,7 +43,7 @@ def init_cmd(force: bool) -> None:
         )
     os.makedirs(DEFAULT_CONFIG_DIR, exist_ok=True)
     with open(DEFAULT_CONFIG_PATH, "w") as f:
-        f.write(_TEMPLATE)
+        f.write(_render_template())
     click.echo(f"Config created: {DEFAULT_CONFIG_PATH}")
 
 

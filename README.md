@@ -18,6 +18,26 @@ smanager group restart music
 - YAML-based global configuration.
 - Rich service status reporting with optional JSON output.
 
+# Phylosophy
+SManager is designed to work alongside your existing setup, not replace it. However here are some best practices to get the most out of SManager:
+- Use one directory per service (service directory), put all the service-related files there (metadata, scripts, Dockerfiles, documentation, etc).
+- Define one directory to store all the service directories (services root).
+- Each time you create a new service, create a metadata file for it using `smanager metadata init` and place it in its service directory.
+
+SManager does not enforce any specific structure for your services, but following these guidelines will help you maintain a clear and organized setup that SManager can effectively manage. If you don't want to follow this structure, just point `services_root` to your $HOME and SManager will work with whatever it finds there.
+
+# Installation
+```bash
+pip install smanager
+```
+After installation, you need to configure SManager by running:
+
+```bash
+smanager config init
+smanager config edit
+```
+An editor will open with the global configuration file. Set the `services_root` to the directory where you want to store your service directories, and configure the VPN provider if you are using one.
+
 ## CLI Usage
 Use this command pattern:
 
