@@ -15,12 +15,22 @@ class ServiceDiscoverer:
         of Service objects.
         """
         services = []
+        seen_ids: dict[str, str] = {}
         for root, _, files in os.walk(self.directory):
             if self.searched_filename in files:
                 sd_abspath = os.path.join(root, self.searched_filename)
                 with open(sd_abspath, 'r') as f:
                     try:
                         metadata = ServiceMetadata.from_json(f.read())
+                        existing_path = seen_ids.get(metadata.id)
+                        if existing_path is not None:
+                            raise ValueError(
+                                "Duplicate service id "
+                                f"'{metadata.id}' found in metadata files: "
+                                f"{existing_path} and {sd_abspath}. "
+                                "Service IDs must be unique."
+                            )
+                        seen_ids[metadata.id] = sd_abspath
                         service = Service(
                             metadata=metadata, 
                             service_abspath=root,
