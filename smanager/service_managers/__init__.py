@@ -7,6 +7,7 @@ from .registry import (
 )
 from .docker_manager import DockerManager
 from .local_manager import LocalManager
+from .php_manager import PhpManager
 
 __all__ = [
     "BaseManager",
@@ -15,5 +16,6 @@ __all__ = [
     "get_service_manager_class",
     "list_service_managers",
     "DockerManager",
-    "LocalManager"
+    "LocalManager",
+    "PhpManager"
 ]

@@ -174,7 +174,7 @@ class MetadataWizard:
         metadata_filename = self._default_metadata_filename()
         runtime_type = self._ask_select(
             "Runtime type",
-            choices=["docker", "local"],
+            choices=["docker", "local", "php"],
             default=infer_runtime_type(service_dir),
         )
 
@@ -185,6 +185,7 @@ class MetadataWizard:
 
         docker_section = None
         local_section = None
+        php_section = None
         if runtime_type == "docker":
             compose_file = self._ask_text("Compose file", find_compose_file(service_dir))
             containers = parse_csv(self._ask_text("Containers (comma-separated)", ""))
@@ -192,7 +193,7 @@ class MetadataWizard:
                 "compose_file": compose_file,
                 "containers": containers or None,
             }
-        else:
+        elif runtime_type == "local":
             installation_path = self._ask_text("Installation path", f"/opt/{service_id}")
             appdata_path = self._ask_text("Appdata path", f"/var/lib/{service_id}")
             systemd_services = parse_csv(self._ask_text("Systemd services (comma-separated)", service_id))
@@ -200,6 +201,21 @@ class MetadataWizard:
                 "installation_path": installation_path,
                 "appdata_path": appdata_path,
                 "systemd_services": systemd_services or [service_id],
+            }
+        else:
+            start_command = self._ask_text("Start command", f"php-fpm --fpm-config /etc/php-fpm/{service_id}.conf")
+            stop_command = self._ask_text("Stop command", "pkill -f php-fpm")
+            status_command = self._ask_text("Status command (optional)", "")
+            healthcheck_url = self._ask_text("Healthcheck URL", f"http://localhost:{webui_port}/health")
+            healthcheck_timeout = self._ask_int("Healthcheck timeout (seconds)", 3)
+            working_dir = self._ask_text("Working directory", str(service_dir))
+            php_section = {
+                "start_command": start_command,
+                "stop_command": stop_command,
+                "status_command": status_command or None,
+                "healthcheck_url": healthcheck_url,
+                "healthcheck_timeout": healthcheck_timeout,
+                "working_dir": working_dir,
             }
 
         available_groups = self._existing_groups(service_dir)
@@ -235,6 +251,8 @@ class MetadataWizard:
             metadata_dict["docker"] = docker_section
         if local_section is not None:
             metadata_dict["local"] = local_section
+        if php_section is not None:
+            metadata_dict["php"] = php_section
 
         metadata = ServiceMetadata.from_dict(metadata_dict)
         self._render_review(metadata, service_dir, metadata_filename)
@@ -424,6 +442,13 @@ class MetadataWizard:
             table.add_row("Installation path", metadata.local.installation_path or "-")
             table.add_row("Appdata path", metadata.local.appdata_path or "-")
             table.add_row("Systemd services", ", ".join(metadata.local.systemd_services or []) or "-")
+        if metadata.php is not None:
+            table.add_row("PHP start command", metadata.php.start_command or "-")
+            table.add_row("PHP stop command", metadata.php.stop_command or "-")
+            table.add_row("PHP status command", metadata.php.status_command or "-")
+            table.add_row("Healthcheck", metadata.php.healthcheck_url or "-")
+            table.add_row("Healthcheck timeout", str(metadata.php.healthcheck_timeout))
+            table.add_row("Working dir", metadata.php.working_dir or "-")
 
         table.add_row("Active", "yes" if metadata.active else "no")
         self.console.print(table)
@@ -566,6 +591,15 @@ class MetadataEditor(MetadataWizard):
             runtime_type = metadata_dict.get("runtime", {}).get("type", "local")
             if runtime_type == "docker":
                 field_keys = ["docker.compose_file", "docker.containers"]
+            elif runtime_type == "php":
+                field_keys = [
+                    "php.start_command",
+                    "php.stop_command",
+                    "php.status_command",
+                    "php.healthcheck_url",
+                    "php.healthcheck_timeout",
+                    "php.working_dir",
+                ]
             else:
                 field_keys = ["local.installation_path", "local.appdata_path", "local.systemd_services"]
         elif section_key == "Groups":
@@ -602,6 +636,9 @@ class MetadataEditor(MetadataWizard):
             if field_key.startswith("docker."):
                 docker = metadata_dict.get("docker", {})
                 return docker.get(field_key.split(".", 1)[1])
+            if field_key.startswith("php."):
+                php = metadata_dict.get("php", {})
+                return php.get(field_key.split(".", 1)[1])
             local = metadata_dict.get("local", {})
             return local.get(field_key.split(".", 1)[1])
         if section_key == "Groups":
@@ -628,7 +665,7 @@ class MetadataEditor(MetadataWizard):
         if section_key == "Runtime":
             runtime = metadata_dict.setdefault("runtime", {})
             if field_key == "type":
-                runtime_type = self._ask_select("Runtime type", ["docker", "local"], str(runtime.get("type", "local")))
+                runtime_type = self._ask_select("Runtime type", ["docker", "local", "php"], str(runtime.get("type", "local")))
                 runtime["type"] = runtime_type
                 self._sync_runtime_sections(metadata_dict)
                 return
@@ -656,6 +693,36 @@ class MetadataEditor(MetadataWizard):
                     containers = docker.get("containers") or []
                     parsed = parse_csv(self._ask_text("Containers (comma-separated)", ", ".join(containers)))
                     docker["containers"] = parsed or None
+                return
+
+            if field_key.startswith("php."):
+                php = metadata_dict.setdefault("php", {})
+                subfield = field_key.split(".", 1)[1]
+                default_port = int(metadata_dict.get("runtime", {}).get("ports", {}).get("webui", 8080))
+                if subfield == "start_command":
+                    php["start_command"] = self._ask_text("Start command", str(php.get("start_command", "php-fpm")))
+                elif subfield == "stop_command":
+                    php["stop_command"] = self._ask_text("Stop command", str(php.get("stop_command", "pkill -f php-fpm")))
+                elif subfield == "status_command":
+                    php["status_command"] = self._ask_text(
+                        "Status command (optional)",
+                        str(php.get("status_command", "")),
+                    ) or None
+                elif subfield == "healthcheck_url":
+                    php["healthcheck_url"] = self._ask_text(
+                        "Healthcheck URL",
+                        str(php.get("healthcheck_url", f"http://localhost:{default_port}/health")),
+                    )
+                elif subfield == "healthcheck_timeout":
+                    php["healthcheck_timeout"] = self._ask_int(
+                        "Healthcheck timeout (seconds)",
+                        int(php.get("healthcheck_timeout", 3)),
+                    )
+                elif subfield == "working_dir":
+                    php["working_dir"] = self._ask_text(
+                        "Working directory",
+                        str(php.get("working_dir", str(target_path.parent))),
+                    )
                 return
 
             local = metadata_dict.setdefault("local", {})
@@ -696,10 +763,29 @@ class MetadataEditor(MetadataWizard):
 
         if runtime_type == "docker":
             metadata_dict.pop("local", None)
+            metadata_dict.pop("php", None)
             metadata_dict.setdefault("docker", {"compose_file": "compose.yaml", "containers": None})
             return
 
+        if runtime_type == "php":
+            metadata_dict.pop("docker", None)
+            metadata_dict.pop("local", None)
+            default_port = int(runtime.get("ports", {}).get("webui", 8080))
+            metadata_dict.setdefault(
+                "php",
+                {
+                    "start_command": "php-fpm",
+                    "stop_command": "pkill -f php-fpm",
+                    "status_command": None,
+                    "healthcheck_url": f"http://localhost:{default_port}/health",
+                    "healthcheck_timeout": 3,
+                    "working_dir": ".",
+                },
+            )
+            return
+
         metadata_dict.pop("docker", None)
+        metadata_dict.pop("php", None)
         service_id = str(metadata_dict.get("id", "service"))
         metadata_dict.setdefault(
             "local",
@@ -756,7 +842,7 @@ class MetadataEditor(MetadataWizard):
 
     def _edit_runtime(self, metadata_dict: dict[str, Any]) -> None:
         runtime = metadata_dict.setdefault("runtime", {})
-        runtime_type = self._ask_select("Runtime type", ["docker", "local"], str(runtime.get("type", "local")))
+        runtime_type = self._ask_select("Runtime type", ["docker", "local", "php"], str(runtime.get("type", "local")))
         runtime["type"] = runtime_type
 
         ports = runtime.setdefault("ports", {})
@@ -766,9 +852,25 @@ class MetadataEditor(MetadataWizard):
 
         if runtime_type == "docker":
             metadata_dict.pop("local", None)
+            metadata_dict.pop("php", None)
             metadata_dict.setdefault("docker", {"compose_file": "compose.yaml", "containers": None})
+        elif runtime_type == "php":
+            metadata_dict.pop("docker", None)
+            metadata_dict.pop("local", None)
+            metadata_dict.setdefault(
+                "php",
+                {
+                    "start_command": "php-fpm",
+                    "stop_command": "pkill -f php-fpm",
+                    "status_command": None,
+                    "healthcheck_url": f"http://localhost:{ports['webui']}/health",
+                    "healthcheck_timeout": 3,
+                    "working_dir": ".",
+                },
+            )
         else:
             metadata_dict.pop("docker", None)
+            metadata_dict.pop("php", None)
             service_id = str(metadata_dict.get("id", "service"))
             metadata_dict.setdefault(
                 "local",
@@ -788,6 +890,26 @@ class MetadataEditor(MetadataWizard):
             containers_csv = ", ".join(containers)
             parsed = parse_csv(self._ask_text("Containers (comma-separated)", containers_csv))
             docker["containers"] = parsed or None
+            return
+
+        if runtime_type == "php":
+            php = metadata_dict.setdefault("php", {})
+            default_port = int(metadata_dict.get("runtime", {}).get("ports", {}).get("webui", 8080))
+            php["start_command"] = self._ask_text("Start command", str(php.get("start_command", "php-fpm")))
+            php["stop_command"] = self._ask_text("Stop command", str(php.get("stop_command", "pkill -f php-fpm")))
+            php["status_command"] = self._ask_text(
+                "Status command (optional)",
+                str(php.get("status_command", "")),
+            ) or None
+            php["healthcheck_url"] = self._ask_text(
+                "Healthcheck URL",
+                str(php.get("healthcheck_url", f"http://localhost:{default_port}/health")),
+            )
+            php["healthcheck_timeout"] = self._ask_int(
+                "Healthcheck timeout (seconds)",
+                int(php.get("healthcheck_timeout", 3)),
+            )
+            php["working_dir"] = self._ask_text("Working directory", str(php.get("working_dir", ".")))
             return
 
         local = metadata_dict.setdefault("local", {})

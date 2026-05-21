@@ -1,0 +1,32 @@
+{
+    "name": "My PHP App",
+    "description": "PHP-FPM application",
+    "schema_version": 2,
+    "id": "my-php-app",
+    "groups": ["web"],
+    "active": true,
+    "runtime": {
+        "type": "php",
+        "ports": {
+            "webui": 8080
+        },
+        "sys_user": "www-data",
+        "sys_group": "www-data"
+    },
+    "php": {
+        "start_command": "php-fpm --fpm-config /etc/php-fpm/my-php-app.conf",
+        "stop_command": "pkill -f php-fpm",
+        "status_command": "php-fpm-healthcheck",
+        "healthcheck_url": "http://localhost:8080/health",
+        "healthcheck_timeout": 3,
+        "working_dir": "/var/www/my-php-app",
+        "env": {
+            "APP_ENV": "production"
+        }
+    },
+    "vpn": {
+        "serve_https": false,
+        "https_restart_delay": 5
+    },
+    "depends_on": []
+}

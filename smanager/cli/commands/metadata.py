@@ -1,13 +1,21 @@
 import click
 from pathlib import Path
+import json as json_module
+from urllib.parse import urlparse
+
+from rich.console import Console
+from rich.table import Table
 
 from ..config import get_metadata_filename
 from ..metadata_wizard import MetadataEditor, MetadataWizard
+from ...datatypes import ServiceMetadata
 
 
 @click.group("metadata")
-def metadata_cmd() -> None:
+@click.pass_context
+def metadata_cmd(ctx: click.Context) -> None:
     """Create and manage service metadata files interactively."""
+    ctx.ensure_object(dict)
 
 
 @metadata_cmd.command("init")
@@ -39,3 +47,146 @@ def edit_cmd(ctx: click.Context, metadata_file: Path | None) -> None:
     """Edit an existing service metadata file interactively."""
     editor = MetadataEditor(metadata_path=metadata_file, metadata_filename=get_metadata_filename(ctx))
     editor.run()
+
+
+def _discover_metadata_files(root: Path, metadata_filename: str) -> list[Path]:
+    return sorted(path for path in root.rglob(metadata_filename) if path.is_file())
+
+
+def _validate_php_rules(metadata: ServiceMetadata, metadata_path: Path) -> list[str]:
+    errors: list[str] = []
+    php = metadata.php
+    if php is None:
+        errors.append("runtime.type=php requires section 'php'.")
+        return errors
+
+    if not str(php.start_command or "").strip():
+        errors.append("php.start_command must be a non-empty string.")
+    if not str(php.stop_command or "").strip():
+        errors.append("php.stop_command must be a non-empty string.")
+    if php.status_command is not None and not str(php.status_command).strip():
+        errors.append("php.status_command must be a non-empty string when provided.")
+
+    if php.working_dir:
+        working_dir_path = Path(php.working_dir)
+        if not working_dir_path.is_absolute():
+            working_dir_path = metadata_path.parent / working_dir_path
+        if not working_dir_path.exists() or not working_dir_path.is_dir():
+            errors.append(f"php.working_dir does not exist or is not a directory: {working_dir_path}")
+
+    if php.healthcheck_url:
+        parsed = urlparse(php.healthcheck_url)
+        if parsed.scheme not in {"http", "https"}:
+            errors.append("php.healthcheck_url must use http or https scheme.")
+        if not parsed.netloc:
+            errors.append("php.healthcheck_url must include a host.")
+
+    return errors
+
+
+def _validate_metadata_file(path: Path) -> dict:
+    errors: list[str] = []
+    metadata: ServiceMetadata | None = None
+
+    try:
+        raw_data = json_module.loads(path.read_text(encoding="utf-8"))
+    except json_module.JSONDecodeError as exc:
+        errors.append(f"Invalid JSON: {exc}")
+        return {
+            "path": str(path),
+            "valid": False,
+            "runtime": "unknown",
+            "errors": errors,
+        }
+    except OSError as exc:
+        errors.append(f"Cannot read file: {exc}")
+        return {
+            "path": str(path),
+            "valid": False,
+            "runtime": "unknown",
+            "errors": errors,
+        }
+
+    try:
+        metadata = ServiceMetadata.from_dict(raw_data)
+    except ValueError as exc:
+        errors.append(str(exc))
+
+    runtime_type = metadata.runtime.type if metadata else str(raw_data.get("runtime", {}).get("type", "unknown"))
+
+    if metadata and runtime_type == "php":
+        errors.extend(_validate_php_rules(metadata, path))
+
+    return {
+        "path": str(path),
+        "valid": len(errors) == 0,
+        "runtime": runtime_type,
+        "errors": errors,
+    }
+
+
+def _render_validation_table(results: list[dict]) -> None:
+    console = Console()
+    table = Table(title="Metadata Validation", header_style="bold cyan", show_lines=False)
+    table.add_column("file", overflow="fold")
+    table.add_column("runtime", no_wrap=True)
+    table.add_column("valid", no_wrap=True)
+    table.add_column("errors", overflow="fold")
+
+    for result in results:
+        table.add_row(
+            result["path"],
+            result["runtime"],
+            "yes" if result["valid"] else "no",
+            " | ".join(result["errors"]) if result["errors"] else "-",
+        )
+
+    console.print(table)
+
+
+@metadata_cmd.command("validate")
+@click.option(
+    "--file",
+    "metadata_file",
+    type=click.Path(path_type=Path, dir_okay=False, exists=False),
+    default=None,
+    metavar="PATH",
+    help="Validate a single metadata file.",
+)
+@click.option(
+    "--root",
+    type=click.Path(path_type=Path, file_okay=False, exists=False),
+    default=None,
+    metavar="DIR",
+    help="Directory to scan recursively when --file is not provided (defaults to current directory).",
+)
+@click.option("--json", "as_json", is_flag=True, help="Output validation results as JSON.")
+@click.pass_context
+def validate_cmd(
+    ctx: click.Context,
+    metadata_file: Path | None,
+    root: Path | None,
+    as_json: bool,
+) -> None:
+    """Validate metadata files against schema and runtime-specific rules."""
+    metadata_filename = get_metadata_filename(ctx)
+
+    if metadata_file is not None:
+        candidates = [metadata_file.expanduser()]
+    else:
+        scan_root = root.expanduser() if root is not None else Path.cwd()
+        candidates = _discover_metadata_files(scan_root, metadata_filename)
+
+    if not candidates:
+        raise click.ClickException(f"No metadata files found (expected {metadata_filename}).")
+
+    results = [_validate_metadata_file(path) for path in candidates]
+    invalid_found = any(not item["valid"] for item in results)
+
+    if as_json:
+        click.echo(json_module.dumps(results, indent=2))
+    else:
+        _render_validation_table(results)
+
+    if invalid_found:
+        ctx.exit(1)

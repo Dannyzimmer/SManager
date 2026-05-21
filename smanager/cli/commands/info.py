@@ -55,6 +55,12 @@ def _runtime_detail(service: Service) -> str:
     if metadata.runtime.type == "docker":
         compose = metadata.docker.compose_file if metadata.docker else None
         return compose or "-"
+    if metadata.runtime.type == "php":
+        if metadata.php and metadata.php.healthcheck_url:
+            return metadata.php.healthcheck_url
+        if metadata.php and metadata.php.start_command:
+            return metadata.php.start_command
+        return "-"
     if metadata.local and metadata.local.systemd_services:
         return ", ".join(metadata.local.systemd_services)
     return "-"

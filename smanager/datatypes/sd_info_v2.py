@@ -61,6 +61,29 @@ class LocalSection:
             appdata_path=data.get('appdata_path'),
             systemd_services=data.get('systemd_services')
         )
+
+
+@dataclass
+class PHPSection:
+    start_command: Optional[str] = None
+    stop_command: Optional[str] = None
+    status_command: Optional[str] = None
+    healthcheck_url: Optional[str] = None
+    healthcheck_timeout: int = 3
+    working_dir: Optional[str] = None
+    env: Optional[dict] = None
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'PHPSection':
+        return cls(
+            start_command=data.get('start_command'),
+            stop_command=data.get('stop_command'),
+            status_command=data.get('status_command'),
+            healthcheck_url=data.get('healthcheck_url'),
+            healthcheck_timeout=data.get('healthcheck_timeout', 3),
+            working_dir=data.get('working_dir'),
+            env=data.get('env')
+        )
     
 @dataclass
 class VPNSection:
@@ -84,6 +107,7 @@ class ServiceMetadata:
     groups: Optional[list] = None
     docker: Optional[DockerSection] = None
     local: Optional[LocalSection] = None
+    php: Optional[PHPSection] = None
     vpn: Optional[VPNSection] = None
     depends_on: Optional[list] = None
 
@@ -102,9 +126,9 @@ class ServiceMetadata:
         if not self.runtime:
             raise ValueError("SDConfig must have a 'runtime' field.")
         
-        if self.runtime.type not in {"docker", "local"}:
+        if self.runtime.type not in {"docker", "local", "php"}:
             raise ValueError(
-                f"Unsupported runtime type '{self.runtime.type}'. Expected 'docker' or 'local'."
+                f"Unsupported runtime type '{self.runtime.type}'. Expected 'docker', 'local', or 'php'."
             )
 
         if self.runtime.type == "docker":
@@ -127,9 +151,31 @@ class ServiceMetadata:
                     "SDConfig with runtime.type 'local' must define 'local.systemd_services'."
                 )
 
+        if self.runtime.type == "php":
+            if not self.php:
+                raise ValueError(
+                    "SDConfig with runtime.type 'php' must define a 'php' section."
+                )
+            if not self.php.start_command or not str(self.php.start_command).strip():
+                raise ValueError(
+                    "SDConfig with runtime.type 'php' must define 'php.start_command'."
+                )
+            if not self.php.stop_command or not str(self.php.stop_command).strip():
+                raise ValueError(
+                    "SDConfig with runtime.type 'php' must define 'php.stop_command'."
+                )
+            if self.php.status_command is not None and not str(self.php.status_command).strip():
+                raise ValueError(
+                    "SDConfig with runtime.type 'php' must define non-empty 'php.status_command' when provided."
+                )
+            if not isinstance(self.php.healthcheck_timeout, int) or self.php.healthcheck_timeout <= 0:
+                raise ValueError(
+                    "SDConfig with runtime.type 'php' must define a positive integer 'php.healthcheck_timeout'."
+                )
+
         # Validate at least one metadata section exists for non-runtime consumers.
-        if not self.docker and not self.local:
-            raise ValueError("SDConfig must have at least one of 'docker' or 'local' sections.")
+        if not self.docker and not self.local and not self.php:
+            raise ValueError("SDConfig must have at least one of 'docker', 'local', or 'php' sections.")
         
     @classmethod
     def from_dict(cls, data: dict) -> 'ServiceMetadata':
@@ -150,6 +196,9 @@ class ServiceMetadata:
         local_data = data.get('local')
         local = LocalSection.from_dict(local_data) if local_data is not None else None
 
+        php_data = data.get('php')
+        php = PHPSection.from_dict(php_data) if php_data is not None else None
+
         vpn_data = data.get('vpn')
         vpn = VPNSection(**vpn_data) if vpn_data is not None else None
 
@@ -163,6 +212,7 @@ class ServiceMetadata:
             runtime=runtime,
             docker=docker,
             local=local,
+            php=php,
             vpn=vpn,
             depends_on=data.get('depends_on')
         )

@@ -1,9 +1,9 @@
 # SManager
-> A simple server manager for self-hosted services, with VPN integration and support for both local and Docker-based services.
+> A simple server manager for self-hosted services, with VPN integration and support for local/systemd, Docker, and PHP runtimes.
 
 When building a self-hosted setup, it’s common to end up with dozens of local services, Docker containers, and maintenance scripts scattered across your system. Tasks as simple as restarting or stopping a service can quickly become frustrating when there’s no clear overview of what is running, how components relate to each other, or how everything is managed.
 
-SManager provides a simple and unified CLI for managing both local and Docker services, with built-in support for VPN integration and interactive metadata management.
+SManager provides a simple and unified CLI for managing local, Docker, and PHP services, with built-in support for VPN integration and interactive metadata management.
 
 Reseting all your music-related services becomes as simple as:
 
@@ -12,7 +12,7 @@ smanager group restart music
 ```
 
 ## Features
-- Unified service management for local/systemd and Docker runtimes.
+- Unified service management for local/systemd, Docker, and PHP runtimes.
 - VPN integration (Tailscale provider support).
 - Interactive metadata creation and editing.
 - YAML-based global configuration.
@@ -112,11 +112,41 @@ Edit a specific file directly:
 smanager metadata edit --file /path/to/sd_info.json
 ```
 
+### Validate Metadata
+Validate a single metadata file:
+
+```bash
+smanager metadata validate --file /path/to/sd_info.json
+```
+
+Validate all metadata files from a directory recursively:
+
+```bash
+smanager metadata validate --root /path/to/services
+```
+
+Use JSON output for CI/automation:
+
+```bash
+smanager metadata validate --root /path/to/services --json
+```
+
 Behavior summary:
 - Interactive prompts with inline defaults.
-- Runtime-aware sections (Docker vs Local).
+- Runtime-aware sections (Docker, Local, and PHP).
 - Multi-select support for `groups` and `depends_on`.
 - Validation before writing changes.
+
+### PHP Runtime Metadata
+For `runtime.type: php`, define the `php` section with:
+
+- `start_command` (required)
+- `stop_command` (required)
+- `status_command` (optional, if present takes precedence over healthcheck for `status`)
+- `healthcheck_url` (optional, used by status checks)
+- `healthcheck_timeout` (optional, defaults to 3)
+- `working_dir` (optional)
+- `env` (optional map of environment variables)
 
 ## Notes
 - `metadata init` creates a new file.
