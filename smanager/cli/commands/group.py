@@ -2,6 +2,7 @@ import click
 
 from ..config import get_manager
 from ..events import attach_cli_event_renderer
+from .info import emit_group_info
 from .status import emit_group_status
 
 
@@ -11,7 +12,7 @@ def group_cmd(ctx: click.Context) -> None:
     """Manage all services in a group.
 
     \b
-    Actions: start, stop, restart, enable, disable, status
+    Actions: start, stop, restart, enable, disable, status, info
     """
 
 
@@ -75,3 +76,13 @@ def group_disable(ctx: click.Context, group_name: str) -> None:
 def group_status(ctx: click.Context, group_name: str, as_json: bool) -> None:
     """Show status for all services in GROUP_NAME."""
     emit_group_status(ctx, group_name, as_json)
+
+
+@group_cmd.command(name="info")
+@click.argument("group_name")
+@click.option("--details", is_flag=True, default=False, help="Include extra metadata columns.")
+@click.option("--json", "as_json", is_flag=True, default=False, help="Output as JSON.")
+@click.pass_context
+def group_info(ctx: click.Context, group_name: str, details: bool, as_json: bool) -> None:
+    """Show info for all services in GROUP_NAME."""
+    emit_group_info(ctx, group_name, as_json, details)

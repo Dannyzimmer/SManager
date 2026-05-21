@@ -49,3 +49,26 @@ class TailscaleVPN(VPNService):
             subprocess.run(["sudo", "tailscale", "serve", f"--https={port}", "off"], check=True)
         except subprocess.CalledProcessError as e:
             raise RuntimeError(f"Failed to stop serving HTTPS on port {port} via Tailscale") from e
+
+    def get_endpoint(self) -> str | None:
+        """Return MagicDNS hostname or first Tailscale IP when available."""
+        try:
+            status = subprocess.run(
+                ["tailscale", "status", "--json"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            parsed = json.loads(status.stdout)
+            self_data = parsed.get("Self") or {}
+
+            dns_name = self_data.get("DNSName")
+            if isinstance(dns_name, str) and dns_name:
+                return dns_name.rstrip(".")
+
+            ips = self_data.get("TailscaleIPs") or []
+            if ips:
+                return str(ips[0])
+            return None
+        except (subprocess.CalledProcessError, FileNotFoundError, json.JSONDecodeError):
+            return None

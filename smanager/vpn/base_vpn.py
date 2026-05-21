@@ -29,4 +29,9 @@ class VPNService:
     def stop_serving_https(self, port: int):
         """Stop serving the VPN connection over HTTPS on the specified port."""
         raise NotImplementedError("stop_serving_https method must be implemented by subclasses.")
+
+    @abstractmethod
+    def get_endpoint(self) -> str | None:
+        """Return a VPN endpoint (MagicDNS or IP) or None when unavailable."""
+        raise NotImplementedError("get_endpoint method must be implemented by subclasses.")
     

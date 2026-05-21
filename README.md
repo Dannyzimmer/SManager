@@ -50,6 +50,23 @@ Optional JSON output is available for each status command:
 smanager service status <service_id> --json
 ```
 
+### Info Commands
+
+Info is available under each resource group and shows service name plus WebUI URL:
+
+```bash
+smanager service info <service_id>
+smanager group info <group_name>
+smanager dependency info <dependency_name>
+smanager all info
+```
+
+Use `--details` to include extra operational columns:
+
+```bash
+smanager service info <service_id> --details
+```
+
 ## Metadata Commands
 The `metadata` group provides interactive workflows for service metadata files.
 

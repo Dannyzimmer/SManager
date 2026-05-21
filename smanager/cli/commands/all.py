@@ -2,6 +2,7 @@ import click
 
 from ..config import get_manager
 from ..events import attach_cli_event_renderer
+from .info import emit_all_info
 from .status import emit_all_status
 
 
@@ -11,7 +12,7 @@ def all_cmd(ctx: click.Context) -> None:
     """Manage all services.
 
     \b
-    Actions: start, stop, restart, enable, disable, status
+    Actions: start, stop, restart, enable, disable, status, info
 
     Management actions require --yes to prevent accidental execution.
     """
@@ -120,3 +121,12 @@ def all_disable(ctx: click.Context, yes: bool) -> None:
 def all_status(ctx: click.Context, as_json: bool) -> None:
     """Show status for all managed services."""
     emit_all_status(ctx, as_json)
+
+
+@all_cmd.command(name="info")
+@click.option("--details", is_flag=True, default=False, help="Include extra metadata columns.")
+@click.option("--json", "as_json", is_flag=True, default=False, help="Output as JSON.")
+@click.pass_context
+def all_info(ctx: click.Context, details: bool, as_json: bool) -> None:
+    """Show info for all managed services."""
+    emit_all_info(ctx, as_json, details)

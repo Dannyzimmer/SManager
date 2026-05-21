@@ -2,6 +2,7 @@ import click
 
 from ..config import get_manager
 from ..events import attach_cli_event_renderer
+from .info import emit_dependency_info
 from .status import emit_dependency_status
 
 
@@ -11,7 +12,7 @@ def dependency_cmd(ctx: click.Context) -> None:
     """Manage services by dependency.
 
     \b
-    Actions: start, stop, restart, enable, disable, status
+    Actions: start, stop, restart, enable, disable, status, info
     """
 
 
@@ -75,3 +76,18 @@ def dependency_disable(ctx: click.Context, dependency_name: str) -> None:
 def dependency_status(ctx: click.Context, dependency_name: str, as_json: bool) -> None:
     """Show status for services by dependency."""
     emit_dependency_status(ctx, dependency_name, as_json)
+
+
+@dependency_cmd.command(name="info")
+@click.argument("dependency_name")
+@click.option("--details", is_flag=True, default=False, help="Include extra metadata columns.")
+@click.option("--json", "as_json", is_flag=True, default=False, help="Output as JSON.")
+@click.pass_context
+def dependency_info(
+    ctx: click.Context,
+    dependency_name: str,
+    details: bool,
+    as_json: bool,
+) -> None:
+    """Show info for services by dependency."""
+    emit_dependency_info(ctx, dependency_name, as_json, details)
