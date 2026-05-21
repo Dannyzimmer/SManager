@@ -8,9 +8,16 @@ from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 
+from .runtime_style import runtime_style, runtime_style_map
+
 
 def _active_cell(active: bool) -> Text:
     return Text("yes", style="green") if active else Text("no", style="red")
+
+
+def _type_cell(runtime_type: str, registered_styles: dict[str, str]) -> Text:
+    style = registered_styles.get(runtime_type, runtime_style(runtime_type))
+    return Text(runtime_type, style=style)
 
 
 def render_info_table(
@@ -22,10 +29,12 @@ def render_info_table(
     if console is None:
         console = Console()
 
+    registered_styles = runtime_style_map()
+
     table = Table(title="Service Info", header_style="bold cyan", show_lines=False)
     table.add_column("name", style="bold")
     table.add_column("webui", style="cyan", overflow="fold")
-    table.add_column("type", style="dim", no_wrap=True)
+    table.add_column("type", no_wrap=True)
     table.add_column("active", no_wrap=True)
     table.add_column("groups")
     table.add_column("depends_on")
@@ -42,7 +51,7 @@ def render_info_table(
         base = [
             str(row.get("name", "-")),
             str(row.get("webui_url", "-")),
-            str(row.get("type", "-")),
+            _type_cell(str(row.get("type", "-")), registered_styles),
             _active_cell(bool(row.get("active", False))),
             str(row.get("groups", "-")),
             str(row.get("depends_on", "-")),
