@@ -1,4 +1,4 @@
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 
 from .global_manager import GlobalManager
 from .datatypes import GlobalConfig, Service, ServiceStatus, MultiStatus
