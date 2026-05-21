@@ -8,15 +8,16 @@ from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 
-from .runtime_style import runtime_style, runtime_style_map
+from .runtime_style import runtime_style, runtime_style_for_activity, runtime_style_map
 
 
 def _active_cell(active: bool) -> Text:
     return Text("yes", style="green") if active else Text("no", style="red")
 
 
-def _type_cell(runtime_type: str, registered_styles: dict[str, str]) -> Text:
-    style = registered_styles.get(runtime_type, runtime_style(runtime_type))
+def _type_cell(runtime_type: str, active: bool, registered_styles: dict[str, str]) -> Text:
+    base_style = registered_styles.get(runtime_type, runtime_style(runtime_type))
+    style = runtime_style_for_activity(runtime_type, active, base_style=base_style)
     return Text(runtime_type, style=style)
 
 
@@ -51,7 +52,11 @@ def render_info_table(
         base = [
             str(row.get("name", "-")),
             str(row.get("webui_url", "-")),
-            _type_cell(str(row.get("type", "-")), registered_styles),
+            _type_cell(
+                str(row.get("type", "-")),
+                bool(row.get("active", False)),
+                registered_styles,
+            ),
             _active_cell(bool(row.get("active", False))),
             str(row.get("groups", "-")),
             str(row.get("depends_on", "-")),
