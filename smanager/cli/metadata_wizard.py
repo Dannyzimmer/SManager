@@ -9,6 +9,7 @@ from typing import Any, Iterable
 
 import click
 from InquirerPy import get_style, inquirer
+from InquirerPy.separator import Separator
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -264,10 +265,26 @@ class MetadataWizard:
             ).execute()
         )
 
-    def _ask_select(self, label: str, choices: list[str], default: str) -> str:
-        if default not in choices:
-            default = choices[0]
-        message = self._inline_prompt_message(label, default)
+    def _ask_select(
+        self,
+        label: str,
+        choices: list[Any],
+        default: str,
+        show_default_in_message: bool = True,
+    ) -> str:
+        values: list[str] = []
+        for choice in choices:
+            if isinstance(choice, dict):
+                values.append(str(choice.get("value", "")))
+            else:
+                values.append(str(choice))
+
+        default_str = str(default)
+        if default_str not in values:
+            default = values[0]
+        else:
+            default = default_str
+        message = self._inline_prompt_message(label, default) if show_default_in_message else label
         return inquirer.select(
             message=message,
             choices=choices,
@@ -417,6 +434,8 @@ class MetadataWizard:
 
 
 class MetadataEditor(MetadataWizard):
+    ACTION_SEPARATOR = Separator(" ")
+
     def __init__(self, metadata_path: Path | None = None, console: Console | None = None, metadata_filename: str = "sd_info.json"):
         super().__init__(output_override=None, console=console, metadata_filename=metadata_filename)
         self.metadata_path = metadata_path
@@ -427,41 +446,27 @@ class MetadataEditor(MetadataWizard):
         ServiceMetadata.from_dict(metadata_dict)
         original_json = json.dumps(metadata_dict, sort_keys=True)
 
-        self.console.print(
-            Panel.fit(
-                f"[bold cyan]Metadata Editor[/]\n"
-                f"[dim]Editing {target_path}. Choose sections and save when ready.[/]",
-                title="smanager metadata edit",
-            )
-        )
-
         while True:
+            self._render_editor_header(target_path, "Choose sections and save when ready.")
             section_choices = self._editor_section_choices(metadata_dict)
+            section_menu_choices = [self.ACTION_SEPARATOR, *section_choices]
             section = self._ask_select(
                 "Edit section",
-                section_choices,
+                section_menu_choices,
                 section_choices[0],
+                show_default_in_message=False,
             )
 
-            if section == "Identity":
-                self._edit_identity(metadata_dict)
-            elif section == "Runtime":
-                self._edit_runtime(metadata_dict)
-            elif section == "Runtime details":
-                self._edit_runtime_details(metadata_dict)
-            elif section == "Groups":
-                self._edit_groups(metadata_dict, target_path)
-            elif section == "Depends on":
-                self._edit_dependencies(metadata_dict, target_path)
-            elif section.startswith("VPN"):
-                self._edit_vpn(metadata_dict)
-            elif section == "Active":
-                metadata_dict["active"] = self._ask_confirm("Enable service", bool(metadata_dict.get("active", True)))
-            elif section == "Save and exit":
+            if section == "Save and exit":
                 break
-            elif section == "Exit without saving":
+            if section == "Exit without saving":
                 self.console.print("[yellow]No changes written.[/]")
                 return target_path
+            if section == "Review current changes":
+                self._review_current_changes(metadata_dict, target_path)
+                continue
+
+            self._edit_section_fields(section, metadata_dict, target_path)
 
         metadata = ServiceMetadata.from_dict(metadata_dict)
         self._render_review(metadata, target_path.parent, target_path.name)
@@ -487,9 +492,206 @@ class MetadataEditor(MetadataWizard):
             "Depends on",
             vpn_label,
             "Active",
+            self.ACTION_SEPARATOR,
+            "Review current changes",
             "Save and exit",
             "Exit without saving",
         ]
+
+    def _render_editor_header(self, target_path: Path, subtitle: str) -> None:
+        click.clear()
+        self.console.print(
+            Panel.fit(
+                f"[bold cyan]Metadata Editor[/]\n"
+                f"[dim]Editing {target_path}. {subtitle}[/]",
+                title="smanager metadata edit",
+            )
+        )
+
+    def _edit_section_fields(self, section: str, metadata_dict: dict[str, Any], target_path: Path) -> None:
+        section_key = "VPN" if section.startswith("VPN") else section
+
+        while True:
+            self._render_editor_header(target_path, f"Editing section: {section_key}")
+            field_choices = self._section_field_choices(section_key, metadata_dict)
+            choices = [self.ACTION_SEPARATOR, *field_choices, self.ACTION_SEPARATOR, "Back to main menu"]
+            selected = self._ask_select(
+                "Edit field",
+                choices,
+                field_choices[0],
+                show_default_in_message=False,
+            )
+
+            if selected == "Back to main menu":
+                return
+
+            field_key = selected.split(":", 1)[0].strip()
+            self._edit_single_field(section_key, field_key, metadata_dict, target_path)
+
+    def _section_field_choices(self, section_key: str, metadata_dict: dict[str, Any]) -> list[str]:
+        if section_key == "Identity":
+            field_keys = ["name", "description", "id"]
+        elif section_key == "Runtime":
+            field_keys = ["type", "ports.webui", "sys_user", "sys_group"]
+        elif section_key == "Runtime details":
+            runtime_type = metadata_dict.get("runtime", {}).get("type", "local")
+            if runtime_type == "docker":
+                field_keys = ["docker.compose_file", "docker.containers"]
+            else:
+                field_keys = ["local.installation_path", "local.appdata_path", "local.systemd_services"]
+        elif section_key == "Groups":
+            field_keys = ["groups"]
+        elif section_key == "Depends on":
+            field_keys = ["depends_on"]
+        elif section_key == "VPN":
+            field_keys = ["serve_https", "https_restart_delay"]
+        elif section_key == "Active":
+            field_keys = ["active"]
+        else:
+            field_keys = []
+
+        return [f"{key}: {self._format_field_value(self._get_field_value(section_key, key, metadata_dict))}" for key in field_keys]
+
+    def _format_field_value(self, value: Any) -> str:
+        if value is None:
+            return "-"
+        if isinstance(value, bool):
+            return "yes" if value else "no"
+        if isinstance(value, list):
+            return ", ".join(str(item) for item in value) or "-"
+        return str(value)
+
+    def _get_field_value(self, section_key: str, field_key: str, metadata_dict: dict[str, Any]) -> Any:
+        if section_key == "Identity":
+            return metadata_dict.get(field_key)
+        if section_key == "Runtime":
+            runtime = metadata_dict.get("runtime", {})
+            if field_key == "ports.webui":
+                return runtime.get("ports", {}).get("webui")
+            return runtime.get(field_key)
+        if section_key == "Runtime details":
+            if field_key.startswith("docker."):
+                docker = metadata_dict.get("docker", {})
+                return docker.get(field_key.split(".", 1)[1])
+            local = metadata_dict.get("local", {})
+            return local.get(field_key.split(".", 1)[1])
+        if section_key == "Groups":
+            return metadata_dict.get("groups")
+        if section_key == "Depends on":
+            return metadata_dict.get("depends_on")
+        if section_key == "VPN":
+            vpn = metadata_dict.get("vpn", {})
+            return vpn.get(field_key)
+        if section_key == "Active":
+            return metadata_dict.get("active")
+        return None
+
+    def _edit_single_field(self, section_key: str, field_key: str, metadata_dict: dict[str, Any], target_path: Path) -> None:
+        if section_key == "Identity":
+            label_map = {
+                "name": "Service name",
+                "description": "Description",
+                "id": "Service id",
+            }
+            metadata_dict[field_key] = self._ask_text(label_map[field_key], str(metadata_dict.get(field_key, "")))
+            return
+
+        if section_key == "Runtime":
+            runtime = metadata_dict.setdefault("runtime", {})
+            if field_key == "type":
+                runtime_type = self._ask_select("Runtime type", ["docker", "local"], str(runtime.get("type", "local")))
+                runtime["type"] = runtime_type
+                self._sync_runtime_sections(metadata_dict)
+                return
+
+            ports = runtime.setdefault("ports", {})
+            if field_key == "ports.webui":
+                ports["webui"] = self._ask_int("Web UI port", int(ports.get("webui", 8080)))
+                return
+
+            if field_key == "sys_user":
+                runtime["sys_user"] = self._ask_text("System user", str(runtime.get("sys_user", metadata_dict.get("id", "service"))))
+                return
+
+            if field_key == "sys_group":
+                runtime["sys_group"] = self._ask_text("System group", str(runtime.get("sys_group", metadata_dict.get("id", "service"))))
+                return
+
+        if section_key == "Runtime details":
+            if field_key.startswith("docker."):
+                docker = metadata_dict.setdefault("docker", {})
+                subfield = field_key.split(".", 1)[1]
+                if subfield == "compose_file":
+                    docker["compose_file"] = self._ask_text("Compose file", str(docker.get("compose_file", "compose.yaml")))
+                elif subfield == "containers":
+                    containers = docker.get("containers") or []
+                    parsed = parse_csv(self._ask_text("Containers (comma-separated)", ", ".join(containers)))
+                    docker["containers"] = parsed or None
+                return
+
+            local = metadata_dict.setdefault("local", {})
+            service_id = str(metadata_dict.get("id", "service"))
+            subfield = field_key.split(".", 1)[1]
+            if subfield == "installation_path":
+                local["installation_path"] = self._ask_text("Installation path", str(local.get("installation_path", f"/opt/{service_id}")))
+            elif subfield == "appdata_path":
+                local["appdata_path"] = self._ask_text("Appdata path", str(local.get("appdata_path", f"/var/lib/{service_id}")))
+            elif subfield == "systemd_services":
+                services = local.get("systemd_services") or [service_id]
+                parsed = parse_csv(self._ask_text("Systemd services (comma-separated)", ", ".join(services)))
+                local["systemd_services"] = parsed or [service_id]
+            return
+
+        if section_key == "Groups":
+            self._edit_groups(metadata_dict, target_path)
+            return
+
+        if section_key == "Depends on":
+            self._edit_dependencies(metadata_dict, target_path)
+            return
+
+        if section_key == "VPN":
+            vpn = metadata_dict.setdefault("vpn", {})
+            if field_key == "serve_https":
+                vpn["serve_https"] = self._ask_confirm("Serve HTTPS through VPN", bool(vpn.get("serve_https", False)))
+            elif field_key == "https_restart_delay":
+                vpn["https_restart_delay"] = self._ask_int("HTTPS restart delay", int(vpn.get("https_restart_delay", 5)))
+            return
+
+        if section_key == "Active":
+            metadata_dict["active"] = self._ask_confirm("Enable service", bool(metadata_dict.get("active", True)))
+
+    def _sync_runtime_sections(self, metadata_dict: dict[str, Any]) -> None:
+        runtime = metadata_dict.setdefault("runtime", {})
+        runtime_type = str(runtime.get("type", "local"))
+
+        if runtime_type == "docker":
+            metadata_dict.pop("local", None)
+            metadata_dict.setdefault("docker", {"compose_file": "compose.yaml", "containers": None})
+            return
+
+        metadata_dict.pop("docker", None)
+        service_id = str(metadata_dict.get("id", "service"))
+        metadata_dict.setdefault(
+            "local",
+            {
+                "installation_path": f"/opt/{service_id}",
+                "appdata_path": f"/var/lib/{service_id}",
+                "systemd_services": [service_id],
+            },
+        )
+
+    def _review_current_changes(self, metadata_dict: dict[str, Any], target_path: Path) -> None:
+        self._render_editor_header(target_path, "Reviewing current changes")
+        try:
+            metadata = ServiceMetadata.from_dict(metadata_dict)
+        except ValueError as exc:
+            self.console.print(f"[red]Cannot render review yet: {exc}[/]")
+            click.pause("Press Enter to continue...")
+            return
+
+        self._render_review(metadata, target_path.parent, target_path.name)
+        click.pause("Press Enter to continue...")
 
     def _resolve_metadata_path(self) -> Path:
         if self.metadata_path is not None:
