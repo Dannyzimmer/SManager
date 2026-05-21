@@ -4,7 +4,10 @@ from ..vpn import VPNService
 import time
 import subprocess
 from ..datatypes import ServiceStatus, SingleStatus
+from .registry import register_service_manager
 
+
+@register_service_manager("local")
 class LocalManager(BaseSDV2Manager):
     def __init__(self, service: Service, vpn: VPNService, restart_delay: int = 5, event_dispatcher=None):
         super().__init__(service, vpn, restart_delay, event_dispatcher=event_dispatcher)

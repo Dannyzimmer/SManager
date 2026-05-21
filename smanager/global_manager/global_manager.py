@@ -1,12 +1,12 @@
-from ..service_managers import DockerManager, LocalManager, BaseManager
+from ..service_managers import BaseManager, get_service_manager_class
 from ..datatypes import Service, GlobalConfig, ServiceStatus, MultiStatus
 from ..vpn import VPNService
 from . import BaseGlobalManager
 
 class GlobalManager(BaseGlobalManager):
     """GlobalManager is responsible for searching and managing all services found in the 
-    specified services directory. It uses the appropriate service manager (DockerManager
-    or LocalManager) based on the service metadata.
+    specified services directory. It uses the appropriate service manager based on the 
+    service metadata.
     """
 
     def __init__(self, services_dir: str, global_config: GlobalConfig, vpn: VPNService):
@@ -22,22 +22,13 @@ class GlobalManager(BaseGlobalManager):
     def get_service_manager(self, service: Service, restart_delay: int = 5) -> BaseManager:
         """Get the appropriate service manager for the given service based on its metadata."""
         delay = service.metadata.vpn.https_restart_delay if service.metadata.vpn and service.metadata.vpn.https_restart_delay is not None else restart_delay
-        if service.metadata.runtime.type == "docker":
-            return DockerManager(
-                service,
-                self.vpn,
-                restart_delay=delay,
-                event_dispatcher=self.event_dispatcher,
-            )
-        elif service.metadata.runtime.type == "local":
-            return LocalManager(
-                service,
-                vpn=self.vpn,
-                restart_delay=delay,
-                event_dispatcher=self.event_dispatcher,
-            )
-        else:
-            raise ValueError(f"Unsupported runtime type: {service.metadata.runtime.type}")
+        manager_class = get_service_manager_class(service.metadata.runtime.type)
+        return manager_class(
+            service,
+            self.vpn,
+            restart_delay=delay,
+            event_dispatcher=self.event_dispatcher,
+        )
         
     def get_group(self, group_name: str) -> list[Service]:
         """Get all services that belong to the specified group."""
