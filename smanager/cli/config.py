@@ -76,3 +76,23 @@ def get_manager(ctx: click.Context) -> GlobalManager:
     if ctx.obj.get("_manager") is None:
         ctx.obj["_manager"] = build_manager(ctx.obj.get("config_path"))
     return ctx.obj["_manager"]
+
+
+def get_metadata_filename(ctx: click.Context) -> str:
+    """Return the configured metadata_filename from GlobalConfig.
+
+    Falls back to the GlobalConfig default when no config file exists yet
+    (e.g. during bootstrap with ``smanager metadata init``).
+    Raises ClickException if a config file exists but cannot be parsed.
+    """
+    config_path = ctx.obj.get("config_path")
+    try:
+        path = resolve_config_path(config_path)
+    except click.ClickException:
+        return GlobalConfig.__dataclass_fields__["metadata_filename"].default
+    with open(path) as f:
+        try:
+            config = GlobalConfig.from_yaml(f.read())
+        except ValueError as e:
+            raise click.ClickException(str(e))
+    return config.metadata_filename

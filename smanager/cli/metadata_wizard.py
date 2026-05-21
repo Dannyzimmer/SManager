@@ -86,7 +86,7 @@ def infer_runtime_type(service_dir: Path) -> str:
     return "local"
 
 
-def discover_existing_metadata(service_root: Path) -> tuple[list[str], list[str], list[str]]:
+def discover_existing_metadata(service_root: Path, metadata_filename: str = "sd_info.json") -> tuple[list[str], list[str], list[str]]:
     existing_ids: list[str] = []
     groups: list[str] = []
     dependencies: list[str] = []
@@ -94,7 +94,7 @@ def discover_existing_metadata(service_root: Path) -> tuple[list[str], list[str]
     if not service_root.exists():
         return existing_ids, groups, dependencies
 
-    for metadata_path in service_root.rglob("sd_info.*"):
+    for metadata_path in service_root.rglob(metadata_filename):
         try:
             with metadata_path.open("r", encoding="utf-8") as handle:
                 metadata = ServiceMetadata.from_json(handle.read())
@@ -111,8 +111,9 @@ def discover_existing_metadata(service_root: Path) -> tuple[list[str], list[str]
 
 
 class MetadataWizard:
-    def __init__(self, output_override: Path | None = None, console: Console | None = None):
+    def __init__(self, output_override: Path | None = None, console: Console | None = None, metadata_filename: str = "sd_info.json"):
         self.output_override = output_override
+        self.metadata_filename = metadata_filename
         self.console = console or Console()
         self.prompt_style = get_style(
             {
@@ -133,7 +134,7 @@ class MetadataWizard:
         self.console.print(
             Panel.fit(
                 "[bold cyan]Service Metadata Wizard[/]\n"
-                "[dim]Create an sd_info.json file interactively. Press Enter to accept defaults.[/]",
+                f"[dim]Create a {self.metadata_filename} file interactively. Press Enter to accept defaults.[/]",
                 title="smanager metadata init",
             )
         )
@@ -143,7 +144,7 @@ class MetadataWizard:
         base_id = slugify(service_name)
         service_dir = self._resolve_service_dir(self._ask_text("Service directory", self._default_service_dir_display()))
 
-        existing_ids, _, _ = discover_existing_metadata(service_dir.parent)
+        existing_ids, _, _ = discover_existing_metadata(service_dir.parent, self.metadata_filename)
         service_id = unique_id(base_id, existing_ids)
 
         metadata_filename = self._ask_text("Metadata filename", self._default_metadata_filename())
@@ -319,11 +320,11 @@ class MetadataWizard:
         return self._dedupe(selected)
 
     def _existing_groups(self, service_dir: Path) -> list[str]:
-        _, groups, _ = discover_existing_metadata(service_dir.parent)
+        _, groups, _ = discover_existing_metadata(service_dir.parent, self.metadata_filename)
         return groups
 
     def _existing_dependencies(self, service_dir: Path, current_service_id: str) -> list[str]:
-        ids, _, dependencies = discover_existing_metadata(service_dir.parent)
+        ids, _, dependencies = discover_existing_metadata(service_dir.parent, self.metadata_filename)
         combined = sorted(set(ids + dependencies) - {current_service_id})
         return combined
 
@@ -343,7 +344,7 @@ class MetadataWizard:
     def _default_metadata_filename(self) -> str:
         if self.output_override is not None:
             return self.output_override.name
-        return "sd_info.json"
+        return self.metadata_filename
 
     def _resolve_output_path(self, service_dir: Path, metadata_filename: str) -> Path:
         if self.output_override is not None:
@@ -413,8 +414,8 @@ class MetadataWizard:
 
 
 class MetadataEditor(MetadataWizard):
-    def __init__(self, metadata_path: Path | None = None, console: Console | None = None):
-        super().__init__(output_override=None, console=console)
+    def __init__(self, metadata_path: Path | None = None, console: Console | None = None, metadata_filename: str = "sd_info.json"):
+        super().__init__(output_override=None, console=console, metadata_filename=metadata_filename)
         self.metadata_path = metadata_path
 
     def run(self) -> Path:
@@ -488,7 +489,7 @@ class MetadataEditor(MetadataWizard):
         else:
             candidates = self._discover_metadata_files(Path.cwd())
             if not candidates:
-                raise click.ClickException("No metadata files found (expected sd_info.*).")
+                raise click.ClickException(f"No metadata files found (expected {self.metadata_filename}).") 
             if len(candidates) == 1:
                 target_path = candidates[0]
             else:
@@ -501,7 +502,7 @@ class MetadataEditor(MetadataWizard):
         return target_path
 
     def _discover_metadata_files(self, root: Path) -> list[Path]:
-        return sorted(path for path in root.rglob("sd_info.*") if path.is_file())
+        return sorted(path for path in root.rglob(self.metadata_filename) if path.is_file())
 
     def _load_metadata_dict(self, path: Path) -> dict[str, Any]:
         try:

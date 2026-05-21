@@ -1,6 +1,7 @@
 import click
 from pathlib import Path
 
+from ..config import get_metadata_filename
 from ..metadata_wizard import MetadataEditor, MetadataWizard
 
 
@@ -17,9 +18,10 @@ def metadata_cmd() -> None:
     metavar="PATH",
     help="Override the output metadata file path.",
 )
-def init_cmd(output: Path | None) -> None:
+@click.pass_context
+def init_cmd(ctx: click.Context, output: Path | None) -> None:
     """Create a service metadata file using an interactive guided wizard."""
-    wizard = MetadataWizard(output_override=output)
+    wizard = MetadataWizard(output_override=output, metadata_filename=get_metadata_filename(ctx))
     wizard.run()
 
 
@@ -32,7 +34,8 @@ def init_cmd(output: Path | None) -> None:
     metavar="PATH",
     help="Path to an existing metadata file. If omitted, choose interactively.",
 )
-def edit_cmd(metadata_file: Path | None) -> None:
+@click.pass_context
+def edit_cmd(ctx: click.Context, metadata_file: Path | None) -> None:
     """Edit an existing service metadata file interactively."""
-    editor = MetadataEditor(metadata_path=metadata_file)
+    editor = MetadataEditor(metadata_path=metadata_file, metadata_filename=get_metadata_filename(ctx))
     editor.run()
