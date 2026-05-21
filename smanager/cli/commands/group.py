@@ -1,20 +1,21 @@
 import click
 
-from . import ACTIONS
 from ..config import get_manager
 from ..events import attach_cli_event_renderer
+from .status import emit_group_status
 
 
-@click.command()
-@click.argument("action", type=click.Choice(ACTIONS, case_sensitive=False))
-@click.argument("group_name")
+@click.group(name="group")
 @click.pass_context
-def group_cmd(ctx: click.Context, action: str, group_name: str) -> None:
-    """Perform ACTION on all services in GROUP_NAME.
+def group_cmd(ctx: click.Context) -> None:
+    """Manage all services in a group.
 
     \b
-    Actions: start, stop, restart, enable, disable
+    Actions: start, stop, restart, enable, disable, status
     """
+
+
+def _run_group_action(ctx: click.Context, action: str, group_name: str) -> None:
     manager = get_manager(ctx)
     detach_renderer = attach_cli_event_renderer(manager, command_scope="group")
     try:
@@ -25,3 +26,52 @@ def group_cmd(ctx: click.Context, action: str, group_name: str) -> None:
         raise click.ClickException(str(e))
     finally:
         detach_renderer()
+
+
+@group_cmd.command(name="start")
+@click.argument("group_name")
+@click.pass_context
+def group_start(ctx: click.Context, group_name: str) -> None:
+    """Start all services in GROUP_NAME."""
+    _run_group_action(ctx, "start", group_name)
+
+
+@group_cmd.command(name="stop")
+@click.argument("group_name")
+@click.pass_context
+def group_stop(ctx: click.Context, group_name: str) -> None:
+    """Stop all services in GROUP_NAME."""
+    _run_group_action(ctx, "stop", group_name)
+
+
+@group_cmd.command(name="restart")
+@click.argument("group_name")
+@click.pass_context
+def group_restart(ctx: click.Context, group_name: str) -> None:
+    """Restart all services in GROUP_NAME."""
+    _run_group_action(ctx, "restart", group_name)
+
+
+@group_cmd.command(name="enable")
+@click.argument("group_name")
+@click.pass_context
+def group_enable(ctx: click.Context, group_name: str) -> None:
+    """Enable all services in GROUP_NAME."""
+    _run_group_action(ctx, "enable", group_name)
+
+
+@group_cmd.command(name="disable")
+@click.argument("group_name")
+@click.pass_context
+def group_disable(ctx: click.Context, group_name: str) -> None:
+    """Disable all services in GROUP_NAME."""
+    _run_group_action(ctx, "disable", group_name)
+
+
+@group_cmd.command(name="status")
+@click.argument("group_name")
+@click.option("--json", "as_json", is_flag=True, default=False, help="Output as JSON.")
+@click.pass_context
+def group_status(ctx: click.Context, group_name: str, as_json: bool) -> None:
+    """Show status for all services in GROUP_NAME."""
+    emit_group_status(ctx, group_name, as_json)

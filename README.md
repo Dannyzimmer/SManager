@@ -1,11 +1,22 @@
 # SManager
 > A simple server manager for self-hosted services, with VPN integration and support for both local and Docker-based services.
 
+When building a self-hosted setup, it’s common to end up with dozens of local services, Docker containers, and maintenance scripts scattered across your system. Tasks as simple as restarting or stopping a service can quickly become frustrating when there’s no clear overview of what is running, how components relate to each other, or how everything is managed.
+
+SManager provides a simple and unified CLI for managing both local and Docker services, with built-in support for VPN integration and interactive metadata management.
+
+Reseting all your music-related services becomes as simple as:
+
+```bash
+smanager group restart music
+```
+
 ## Features
 - Unified service management for local/systemd and Docker runtimes.
 - VPN integration (Tailscale provider support).
 - Interactive metadata creation and editing.
 - YAML-based global configuration.
+- Rich service status reporting with optional JSON output.
 
 ## CLI Usage
 Use this command pattern:
@@ -20,6 +31,23 @@ Discover available commands at any level:
 smanager --help
 smanager <group> --help
 smanager <group> <command> --help
+```
+
+### Status Commands
+
+Status is now a subcommand under each resource group:
+
+```bash
+smanager service status <service_id>
+smanager group status <group_name>
+smanager dependency status <dependency_name>
+smanager all status
+```
+
+Optional JSON output is available for each status command:
+
+```bash
+smanager service status <service_id> --json
 ```
 
 ## Metadata Commands

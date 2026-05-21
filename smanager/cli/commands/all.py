@@ -1,27 +1,23 @@
 import click
 
-from . import ACTIONS
 from ..config import get_manager
 from ..events import attach_cli_event_renderer
+from .status import emit_all_status
 
 
-@click.command("all")
-@click.argument("action", type=click.Choice(ACTIONS, case_sensitive=False))
-@click.option(
-    "--yes",
-    is_flag=True,
-    default=False,
-    help="Confirm the operation on all services.",
-)
+@click.group(name="all")
 @click.pass_context
-def all_cmd(ctx: click.Context, action: str, yes: bool) -> None:
-    """Perform ACTION on ALL managed services.
+def all_cmd(ctx: click.Context) -> None:
+    """Manage all services.
 
     \b
-    Actions: start, stop, restart, enable, disable
+    Actions: start, stop, restart, enable, disable, status
 
-    Requires --yes to prevent accidental execution.
+    Management actions require --yes to prevent accidental execution.
     """
+
+
+def _run_all_action(ctx: click.Context, action: str, yes: bool) -> None:
     if not yes:
         raise click.UsageError(
             f"This will run '{action}' on ALL services. Pass --yes to confirm."
@@ -36,3 +32,91 @@ def all_cmd(ctx: click.Context, action: str, yes: bool) -> None:
         raise click.ClickException(str(e))
     finally:
         detach_renderer()
+
+
+@all_cmd.command(name="start")
+@click.option(
+    "--yes",
+    is_flag=True,
+    default=False,
+    help="Confirm the operation on all services.",
+)
+@click.pass_context
+def all_start(ctx: click.Context, yes: bool) -> None:
+    """Start all managed services.
+
+    Requires --yes to prevent accidental execution.
+    """
+    _run_all_action(ctx, "start", yes)
+
+
+@all_cmd.command(name="stop")
+@click.option(
+    "--yes",
+    is_flag=True,
+    default=False,
+    help="Confirm the operation on all services.",
+)
+@click.pass_context
+def all_stop(ctx: click.Context, yes: bool) -> None:
+    """Stop all managed services.
+
+    Requires --yes to prevent accidental execution.
+    """
+    _run_all_action(ctx, "stop", yes)
+
+
+@all_cmd.command(name="restart")
+@click.option(
+    "--yes",
+    is_flag=True,
+    default=False,
+    help="Confirm the operation on all services.",
+)
+@click.pass_context
+def all_restart(ctx: click.Context, yes: bool) -> None:
+    """Restart all managed services.
+
+    Requires --yes to prevent accidental execution.
+    """
+    _run_all_action(ctx, "restart", yes)
+
+
+@all_cmd.command(name="enable")
+@click.option(
+    "--yes",
+    is_flag=True,
+    default=False,
+    help="Confirm the operation on all services.",
+)
+@click.pass_context
+def all_enable(ctx: click.Context, yes: bool) -> None:
+    """Enable all managed services.
+
+    Requires --yes to prevent accidental execution.
+    """
+    _run_all_action(ctx, "enable", yes)
+
+
+@all_cmd.command(name="disable")
+@click.option(
+    "--yes",
+    is_flag=True,
+    default=False,
+    help="Confirm the operation on all services.",
+)
+@click.pass_context
+def all_disable(ctx: click.Context, yes: bool) -> None:
+    """Disable all managed services.
+
+    Requires --yes to prevent accidental execution.
+    """
+    _run_all_action(ctx, "disable", yes)
+
+
+@all_cmd.command(name="status")
+@click.option("--json", "as_json", is_flag=True, default=False, help="Output as JSON.")
+@click.pass_context
+def all_status(ctx: click.Context, as_json: bool) -> None:
+    """Show status for all managed services."""
+    emit_all_status(ctx, as_json)

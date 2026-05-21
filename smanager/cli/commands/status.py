@@ -7,65 +7,44 @@ from ..config import get_manager
 from ..formatters import render_status_table
 
 
-@click.command()
-@click.option("--service", "service_id", default=None, metavar="ID",
-              help="Status of a single service.")
-@click.option("--group", "group_name", default=None, metavar="NAME",
-              help="Status of all services in a group.")
-@click.option("--dependency", "dependency_name", default=None, metavar="NAME",
-              help="Status of services by dependency.")
-@click.option("--all", "all_services", is_flag=True, default=False,
-              help="Status of all services.")
-@click.option("--json", "as_json", is_flag=True, default=False,
-              help="Output as JSON.")
-@click.pass_context
-def status_cmd(
-    ctx: click.Context,
-    service_id: str | None,
-    group_name: str | None,
-    dependency_name: str | None,
-    all_services: bool,
-    as_json: bool,
-) -> None:
-    """Show the status of services.
+def _emit_status(result: object, as_json: bool) -> None:
+    if as_json:
+        click.echo(json_module.dumps(dataclasses.asdict(result), indent=2))
+    else:
+        render_status_table(result)
 
-    \b
-    Provide exactly one scope:
-      --service ID        single service
-      --group NAME        all services in a group
-      --dependency NAME   all services by dependency
-      --all               every managed service
-    """
-    scopes = [x for x in [service_id, group_name, dependency_name] if x] + (
-        [True] if all_services else []
-    )
-    if len(scopes) == 0:
-        raise click.UsageError(
-            "Provide one of: --service, --group, --dependency, --all"
-        )
-    if len(scopes) > 1:
-        raise click.UsageError(
-            "Only one of --service, --group, --dependency, --all can be used at a time."
-        )
 
+def emit_service_status(ctx: click.Context, service_id: str, as_json: bool) -> None:
     manager = get_manager(ctx)
     try:
-        if service_id:
-            result = manager.get_status(service_id)
-            if as_json:
-                click.echo(json_module.dumps(dataclasses.asdict(result), indent=2))
-            else:
-                render_status_table(result)
-        else:
-            if group_name:
-                result = manager.get_group_status(group_name)
-            elif dependency_name:
-                result = manager.get_dependency_status(dependency_name)
-            else:
-                result = manager.get_all_status()
-            if as_json:
-                click.echo(json_module.dumps(dataclasses.asdict(result), indent=2))
-            else:
-                render_status_table(result)
+        result = manager.get_status(service_id)
+        _emit_status(result, as_json)
+    except ValueError as e:
+        raise click.ClickException(str(e))
+
+
+def emit_group_status(ctx: click.Context, group_name: str, as_json: bool) -> None:
+    manager = get_manager(ctx)
+    try:
+        result = manager.get_group_status(group_name)
+        _emit_status(result, as_json)
+    except ValueError as e:
+        raise click.ClickException(str(e))
+
+
+def emit_dependency_status(ctx: click.Context, dependency_name: str, as_json: bool) -> None:
+    manager = get_manager(ctx)
+    try:
+        result = manager.get_dependency_status(dependency_name)
+        _emit_status(result, as_json)
+    except ValueError as e:
+        raise click.ClickException(str(e))
+
+
+def emit_all_status(ctx: click.Context, as_json: bool) -> None:
+    manager = get_manager(ctx)
+    try:
+        result = manager.get_all_status()
+        _emit_status(result, as_json)
     except ValueError as e:
         raise click.ClickException(str(e))
