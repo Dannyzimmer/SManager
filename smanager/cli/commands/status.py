@@ -19,7 +19,7 @@ def emit_service_status(ctx: click.Context, service_id: str, as_json: bool) -> N
     try:
         result = manager.get_status(service_id)
         _emit_status(result, as_json)
-    except ValueError as e:
+    except Exception as e:
         raise click.ClickException(str(e))
 
 
@@ -28,7 +28,7 @@ def emit_group_status(ctx: click.Context, group_name: str, as_json: bool) -> Non
     try:
         result = manager.get_group_status(group_name)
         _emit_status(result, as_json)
-    except ValueError as e:
+    except Exception as e:
         raise click.ClickException(str(e))
 
 
@@ -37,7 +37,7 @@ def emit_dependency_status(ctx: click.Context, dependency_name: str, as_json: bo
     try:
         result = manager.get_dependency_status(dependency_name)
         _emit_status(result, as_json)
-    except ValueError as e:
+    except Exception as e:
         raise click.ClickException(str(e))
 
 
@@ -46,5 +46,5 @@ def emit_all_status(ctx: click.Context, as_json: bool) -> None:
     try:
         result = manager.get_all_status()
         _emit_status(result, as_json)
-    except ValueError as e:
+    except Exception as e:
         raise click.ClickException(str(e))

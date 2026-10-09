@@ -61,102 +61,42 @@ class PhpManager(BaseSDV2Manager):
             env=run_env,
         )
 
-    def start(self):
-        self._emit_event(
-            scope="service",
-            action="start",
-            phase="before",
-            service_id=self.get_id(),
-        )
-        if not self.service.metadata.active:
-            self._emit_event(
-                scope="service",
-                action="start",
-                phase="skipped",
-                service_id=self.get_id(),
-                message="Service is inactive.",
+    def _start_runtime(self):
+        start_command = self._php_metadata().start_command
+        if not start_command or not str(start_command).strip():
+            raise ValueError(
+                f"Service '{self.get_id()}' is configured as php but is missing "
+                "'php.start_command'. Provide 'scripts.start' or define the command."
             )
-            return
+        self._run_shell_command(start_command)
 
-        try:
-            self._run_shell_command(self._php_metadata().start_command)
-        except Exception as exc:
-            self._emit_event(
-                scope="service",
-                action="start",
-                phase="failed",
-                service_id=self.get_id(),
-                error=exc,
+    def _stop_runtime(self):
+        stop_command = self._php_metadata().stop_command
+        if not stop_command or not str(stop_command).strip():
+            raise ValueError(
+                f"Service '{self.get_id()}' is configured as php but is missing "
+                "'php.stop_command'. Provide 'scripts.stop' or define the command."
             )
-            raise
-
-        self._emit_event(
-            scope="service",
-            action="start",
-            phase="after",
-            service_id=self.get_id(),
-        )
-
-    def stop(self):
-        self._emit_event(
-            scope="service",
-            action="stop",
-            phase="before",
-            service_id=self.get_id(),
-        )
-
-        try:
-            self._run_shell_command(self._php_metadata().stop_command)
-        except Exception as exc:
-            self._emit_event(
-                scope="service",
-                action="stop",
-                phase="failed",
-                service_id=self.get_id(),
-                error=exc,
-            )
-            raise
-
-        self._emit_event(
-            scope="service",
-            action="stop",
-            phase="after",
-            service_id=self.get_id(),
-        )
-
-    def restart(self):
-        self._emit_event(
-            scope="service",
-            action="restart",
-            phase="before",
-            service_id=self.get_id(),
-        )
-
-        try:
-            try:
-                self.stop()
-            except Exception:
-                pass
-            self.start()
-        except Exception as exc:
-            self._emit_event(
-                scope="service",
-                action="restart",
-                phase="failed",
-                service_id=self.get_id(),
-                error=exc,
-            )
-            raise
-
-        self._emit_event(
-            scope="service",
-            action="restart",
-            phase="after",
-            service_id=self.get_id(),
-        )
+        self._run_shell_command(stop_command)
 
     def status(self) -> ServiceStatus:
-        php_metadata = self._php_metadata()
+        script_status = self._script_status()
+        if script_status is not None:
+            return ServiceStatus(
+                id=self.get_id(),
+                type=self.service.metadata.runtime.type,
+                statuses=[SingleStatus(name="scripts.status", status=script_status)],
+                enabled=bool(self.service.metadata.active),
+            )
+
+        php_metadata = self.service.metadata.php
+        if php_metadata is None:
+            return ServiceStatus(
+                id=self.get_id(),
+                type=self.service.metadata.runtime.type,
+                statuses=[SingleStatus(name="scripts.status", status="unknown")],
+                enabled=bool(self.service.metadata.active),
+            )
         status_command = php_metadata.status_command
 
         if status_command:

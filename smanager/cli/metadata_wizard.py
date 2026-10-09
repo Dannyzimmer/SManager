@@ -218,6 +218,10 @@ class MetadataWizard:
                 "working_dir": working_dir,
             }
 
+        scripts_section = None
+        if self._ask_confirm("Use custom scripts for start/stop/restart", False):
+            scripts_section = self._ask_scripts()
+
         available_groups = self._existing_groups(service_dir)
         available_dependencies = self._existing_dependencies(service_dir, service_id)
         groups = self._ask_groups(available_groups)
@@ -253,6 +257,8 @@ class MetadataWizard:
             metadata_dict["local"] = local_section
         if php_section is not None:
             metadata_dict["php"] = php_section
+        if scripts_section is not None:
+            metadata_dict["scripts"] = scripts_section
 
         metadata = ServiceMetadata.from_dict(metadata_dict)
         self._render_review(metadata, service_dir, metadata_filename)
@@ -305,6 +311,17 @@ class MetadataWizard:
                 **self._prompt_config(),
             ).execute()
         )
+
+    def _ask_scripts(self) -> dict[str, Any] | None:
+        section: dict[str, Any] = {}
+        for action in ("start", "stop", "restart", "status"):
+            value = self._ask_text(f"{action.capitalize()} script (.sh path, optional)", "").strip()
+            if value:
+                section[action] = value
+        working_dir = self._ask_text("Scripts working directory (optional)", "").strip()
+        if working_dir:
+            section["working_dir"] = working_dir
+        return section or None
 
     def _ask_select(
         self,
@@ -450,6 +467,13 @@ class MetadataWizard:
             table.add_row("Healthcheck timeout", str(metadata.php.healthcheck_timeout))
             table.add_row("Working dir", metadata.php.working_dir or "-")
 
+        if metadata.scripts is not None:
+            table.add_row("Script start", metadata.scripts.start or "-")
+            table.add_row("Script stop", metadata.scripts.stop or "-")
+            table.add_row("Script restart", metadata.scripts.restart or "-")
+            table.add_row("Script status", metadata.scripts.status or "-")
+            table.add_row("Script working dir", metadata.scripts.working_dir or "-")
+
         table.add_row("Active", "yes" if metadata.active else "no")
         self.console.print(table)
 
@@ -542,6 +566,7 @@ class MetadataEditor(MetadataWizard):
             "Identity",
             "Runtime",
             "Runtime details",
+            "Scripts",
             "Groups",
             "Depends on",
             vpn_label,
@@ -602,6 +627,14 @@ class MetadataEditor(MetadataWizard):
                 ]
             else:
                 field_keys = ["local.installation_path", "local.appdata_path", "local.systemd_services"]
+        elif section_key == "Scripts":
+            field_keys = [
+                "scripts.start",
+                "scripts.stop",
+                "scripts.restart",
+                "scripts.status",
+                "scripts.working_dir",
+            ]
         elif section_key == "Groups":
             field_keys = ["groups"]
         elif section_key == "Depends on":
@@ -641,6 +674,9 @@ class MetadataEditor(MetadataWizard):
                 return php.get(field_key.split(".", 1)[1])
             local = metadata_dict.get("local", {})
             return local.get(field_key.split(".", 1)[1])
+        if section_key == "Scripts":
+            scripts = metadata_dict.get("scripts", {})
+            return scripts.get(field_key.split(".", 1)[1])
         if section_key == "Groups":
             return metadata_dict.get("groups")
         if section_key == "Depends on":
@@ -736,6 +772,27 @@ class MetadataEditor(MetadataWizard):
                 services = local.get("systemd_services") or [service_id]
                 parsed = parse_csv(self._ask_text("Systemd services (comma-separated)", ", ".join(services)))
                 local["systemd_services"] = parsed or [service_id]
+            return
+
+        if section_key == "Scripts":
+            scripts = metadata_dict.setdefault("scripts", {})
+            subfield = field_key.split(".", 1)[1]
+            if subfield == "working_dir":
+                value = self._ask_text(
+                    "Scripts working directory",
+                    str(scripts.get("working_dir", "")),
+                ).strip()
+            else:
+                value = self._ask_text(
+                    f"{subfield.capitalize()} script (.sh path)",
+                    str(scripts.get(subfield, "")),
+                ).strip()
+            if value:
+                scripts[subfield] = value
+            else:
+                scripts.pop(subfield, None)
+            if not scripts:
+                metadata_dict.pop("scripts", None)
             return
 
         if section_key == "Groups":

@@ -120,7 +120,7 @@ def emit_service_info(
         service = _resolve_service(manager, service_id)
         row = _to_info_row(service, details, vpn_endpoint)
         _emit_info_rows([row], as_json, details, single_item_json=True)
-    except ValueError as e:
+    except Exception as e:
         raise click.ClickException(str(e))
 
 
@@ -136,7 +136,7 @@ def emit_group_info(
         services = manager.get_group(group_name)
         rows = [_to_info_row(service, details, vpn_endpoint) for service in services]
         _emit_info_rows(rows, as_json, details, single_item_json=False)
-    except ValueError as e:
+    except Exception as e:
         raise click.ClickException(str(e))
 
 
@@ -152,7 +152,7 @@ def emit_dependency_info(
         services = manager.get_services_by_dependency(dependency_name)
         rows = [_to_info_row(service, details, vpn_endpoint) for service in services]
         _emit_info_rows(rows, as_json, details, single_item_json=False)
-    except ValueError as e:
+    except Exception as e:
         raise click.ClickException(str(e))
 
 
@@ -162,5 +162,5 @@ def emit_all_info(ctx: click.Context, as_json: bool, details: bool) -> None:
         vpn_endpoint = _resolve_vpn_endpoint(manager)
         rows = [_to_info_row(service, details, vpn_endpoint) for service in manager.services]
         _emit_info_rows(rows, as_json, details, single_item_json=False)
-    except ValueError as e:
+    except Exception as e:
         raise click.ClickException(str(e))

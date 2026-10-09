@@ -64,6 +64,35 @@ class LocalSection:
 
 
 @dataclass
+class ScriptSection:
+    start: Optional[str] = None
+    stop: Optional[str] = None
+    restart: Optional[str] = None
+    status: Optional[str] = None
+    working_dir: Optional[str] = None
+    env: Optional[dict] = None
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'ScriptSection':
+        return cls(
+            start=data.get('start'),
+            stop=data.get('stop'),
+            restart=data.get('restart'),
+            status=data.get('status'),
+            working_dir=data.get('working_dir'),
+            env=data.get('env'),
+        )
+
+    def overrides(self, action: str) -> bool:
+        """Return True when a script is defined for the given action."""
+        value = getattr(self, action, None)
+        return bool(str(value).strip()) if value is not None else False
+
+    def has_any(self) -> bool:
+        return any(self.overrides(action) for action in ("start", "stop", "restart", "status"))
+
+
+@dataclass
 class PHPSection:
     start_command: Optional[str] = None
     stop_command: Optional[str] = None
@@ -108,6 +137,7 @@ class ServiceMetadata:
     docker: Optional[DockerSection] = None
     local: Optional[LocalSection] = None
     php: Optional[PHPSection] = None
+    scripts: Optional[ScriptSection] = None
     vpn: Optional[VPNSection] = None
     depends_on: Optional[list] = None
 
@@ -131,38 +161,63 @@ class ServiceMetadata:
                 f"Unsupported runtime type '{self.runtime.type}'. Expected 'docker', 'local', or 'php'."
             )
 
+        if self.scripts is not None:
+            for action in ("start", "stop", "restart", "status"):
+                value = getattr(self.scripts, action, None)
+                if value is not None and not str(value).strip():
+                    raise ValueError(
+                        f"SDConfig 'scripts.{action}' must be a non-empty string when provided."
+                    )
+
+        scripts_cover_lifecycle = bool(
+            self.scripts
+            and self.scripts.overrides("start")
+            and self.scripts.overrides("stop")
+        )
+
         if self.runtime.type == "docker":
-            if not self.docker:
+            if not self.docker and not scripts_cover_lifecycle:
                 raise ValueError(
-                    "SDConfig with runtime.type 'docker' must define a 'docker' section."
+                    "SDConfig with runtime.type 'docker' must define a 'docker' section "
+                    "unless 'scripts.start' and 'scripts.stop' are provided."
                 )
-            if not self.docker.compose_file:
+            if self.docker and not self.docker.compose_file and not scripts_cover_lifecycle:
                 raise ValueError(
-                    "SDConfig with runtime.type 'docker' must define 'docker.compose_file'."
+                    "SDConfig with runtime.type 'docker' must define 'docker.compose_file' "
+                    "unless 'scripts.start' and 'scripts.stop' are provided."
                 )
 
         if self.runtime.type == "local":
-            if not self.local:
+            if not self.local and not scripts_cover_lifecycle:
                 raise ValueError(
-                    "SDConfig with runtime.type 'local' must define a 'local' section."
+                    "SDConfig with runtime.type 'local' must define a 'local' section "
+                    "unless 'scripts.start' and 'scripts.stop' are provided."
                 )
-            if not self.local.systemd_services:
+            if self.local and not self.local.systemd_services and not scripts_cover_lifecycle:
                 raise ValueError(
-                    "SDConfig with runtime.type 'local' must define 'local.systemd_services'."
+                    "SDConfig with runtime.type 'local' must define 'local.systemd_services' "
+                    "unless 'scripts.start' and 'scripts.stop' are provided."
                 )
 
         if self.runtime.type == "php":
-            if not self.php:
+            if not self.php and not scripts_cover_lifecycle:
                 raise ValueError(
-                    "SDConfig with runtime.type 'php' must define a 'php' section."
+                    "SDConfig with runtime.type 'php' must define a 'php' section "
+                    "unless 'scripts.start' and 'scripts.stop' are provided."
                 )
-            if not self.php.start_command or not str(self.php.start_command).strip():
+            if (not self.php.start_command or not str(self.php.start_command).strip()) and not (
+                self.scripts and self.scripts.overrides("start")
+            ):
                 raise ValueError(
-                    "SDConfig with runtime.type 'php' must define 'php.start_command'."
+                    "SDConfig with runtime.type 'php' must define 'php.start_command' "
+                    "unless 'scripts.start' is provided."
                 )
-            if not self.php.stop_command or not str(self.php.stop_command).strip():
+            if (not self.php.stop_command or not str(self.php.stop_command).strip()) and not (
+                self.scripts and self.scripts.overrides("stop")
+            ):
                 raise ValueError(
-                    "SDConfig with runtime.type 'php' must define 'php.stop_command'."
+                    "SDConfig with runtime.type 'php' must define 'php.stop_command' "
+                    "unless 'scripts.stop' is provided."
                 )
             if self.php.status_command is not None and not str(self.php.status_command).strip():
                 raise ValueError(
@@ -174,8 +229,12 @@ class ServiceMetadata:
                 )
 
         # Validate at least one metadata section exists for non-runtime consumers.
-        if not self.docker and not self.local and not self.php:
-            raise ValueError("SDConfig must have at least one of 'docker', 'local', or 'php' sections.")
+        if not self.docker and not self.local and not self.php and not (
+            self.scripts and self.scripts.has_any()
+        ):
+            raise ValueError(
+                "SDConfig must have at least one of 'docker', 'local', 'php', or 'scripts' sections."
+            )
         
     @classmethod
     def from_dict(cls, data: dict) -> 'ServiceMetadata':
@@ -199,6 +258,9 @@ class ServiceMetadata:
         php_data = data.get('php')
         php = PHPSection.from_dict(php_data) if php_data is not None else None
 
+        scripts_data = data.get('scripts')
+        scripts = ScriptSection.from_dict(scripts_data) if scripts_data is not None else None
+
         vpn_data = data.get('vpn')
         vpn = VPNSection(**vpn_data) if vpn_data is not None else None
 
@@ -213,6 +275,7 @@ class ServiceMetadata:
             docker=docker,
             local=local,
             php=php,
+            scripts=scripts,
             vpn=vpn,
             depends_on=data.get('depends_on')
         )

@@ -61,6 +61,23 @@ class GlobalManager(BaseGlobalManager):
         except Exception:
             raise
 
+    def _collect_failures(self, services: list[Service], action: str) -> list[tuple[str, BaseException]]:
+        """Run *action* on every service, collecting failures instead of aborting."""
+        failures: list[tuple[str, BaseException]] = []
+        for service in services:
+            try:
+                self.manage_service(service.metadata.id, action)
+            except Exception as exc:  # noqa: BLE001 - report and continue with the rest
+                failures.append((service.metadata.id, exc))
+        return failures
+
+    @staticmethod
+    def _failure_summary(action: str, services: list[Service], failures: list[tuple[str, BaseException]]) -> str:
+        details = "; ".join(f"'{sid}': {err}" for sid, err in failures)
+        return (
+            f"'{action}' failed for {len(failures)}/{len(services)} service(s): {details}"
+        )
+
     def _manage_collection(self, scope: str, identifier: str, services: list[Service], action: str):
         self._emit_event(
             scope=scope,
@@ -70,20 +87,22 @@ class GlobalManager(BaseGlobalManager):
             dependency_name=identifier if scope == "dependency" else None,
             payload={"service_count": len(services)},
         )
-        try:
-            for service in services:
-                self.manage_service(service.metadata.id, action)
-        except Exception as exc:
+        failures = self._collect_failures(services, action)
+        if failures:
+            error = RuntimeError(self._failure_summary(action, services, failures))
             self._emit_event(
                 scope=scope,
                 action=action,
                 phase="failed",
                 group_name=identifier if scope == "group" else None,
                 dependency_name=identifier if scope == "dependency" else None,
-                payload={"service_count": len(services)},
-                error=exc,
+                payload={
+                    "service_count": len(services),
+                    "failed": [sid for sid, _ in failures],
+                },
+                error=error,
             )
-            raise
+            raise error
         self._emit_event(
             scope=scope,
             action=action,
@@ -116,18 +135,20 @@ class GlobalManager(BaseGlobalManager):
             phase="before",
             payload={"service_count": len(self.services)},
         )
-        try:
-            for service in self.services:
-                self.manage_service(service.metadata.id, action)
-        except Exception as exc:
+        failures = self._collect_failures(self.services, action)
+        if failures:
+            error = RuntimeError(self._failure_summary(action, self.services, failures))
             self._emit_event(
                 scope="all",
                 action=action,
                 phase="failed",
-                payload={"service_count": len(self.services)},
-                error=exc,
+                payload={
+                    "service_count": len(self.services),
+                    "failed": [sid for sid, _ in failures],
+                },
+                error=error,
             )
-            raise
+            raise error
         self._emit_event(
             scope="all",
             action=action,

@@ -84,6 +84,34 @@ def _validate_php_rules(metadata: ServiceMetadata, metadata_path: Path) -> list[
     return errors
 
 
+def _validate_scripts_rules(metadata: ServiceMetadata, metadata_path: Path) -> list[str]:
+    errors: list[str] = []
+    scripts = metadata.scripts
+    if scripts is None:
+        return errors
+
+    for action in ("start", "stop", "restart", "status"):
+        value = getattr(scripts, action, None)
+        if value is None or not str(value).strip():
+            continue
+        script_path = Path(str(value)).expanduser()
+        if not script_path.is_absolute():
+            script_path = metadata_path.parent / script_path
+        if not script_path.is_file():
+            errors.append(f"scripts.{action} file not found: {script_path}")
+
+    if scripts.working_dir:
+        working_dir = Path(str(scripts.working_dir)).expanduser()
+        if not working_dir.is_absolute():
+            working_dir = metadata_path.parent / working_dir
+        if not working_dir.is_dir():
+            errors.append(
+                f"scripts.working_dir does not exist or is not a directory: {working_dir}"
+            )
+
+    return errors
+
+
 def _validate_metadata_file(path: Path) -> dict:
     errors: list[str] = []
     metadata: ServiceMetadata | None = None
@@ -116,6 +144,9 @@ def _validate_metadata_file(path: Path) -> dict:
 
     if metadata and runtime_type == "php":
         errors.extend(_validate_php_rules(metadata, path))
+
+    if metadata:
+        errors.extend(_validate_scripts_rules(metadata, path))
 
     return {
         "path": str(path),

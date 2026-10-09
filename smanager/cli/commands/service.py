@@ -21,9 +21,7 @@ def _run_service_action(ctx: click.Context, action: str, service_id: str) -> Non
     detach_renderer = attach_cli_event_renderer(manager, command_scope="service")
     try:
         manager.manage_service(service_id, action)
-    except ValueError as e:
-        raise click.ClickException(str(e))
-    except RuntimeError as e:
+    except Exception as e:
         raise click.ClickException(str(e))
     finally:
         detach_renderer()

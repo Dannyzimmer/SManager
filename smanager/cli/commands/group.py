@@ -21,9 +21,7 @@ def _run_group_action(ctx: click.Context, action: str, group_name: str) -> None:
     detach_renderer = attach_cli_event_renderer(manager, command_scope="group")
     try:
         manager.manage_group(group_name, action)
-    except ValueError as e:
-        raise click.ClickException(str(e))
-    except RuntimeError as e:
+    except Exception as e:
         raise click.ClickException(str(e))
     finally:
         detach_renderer()

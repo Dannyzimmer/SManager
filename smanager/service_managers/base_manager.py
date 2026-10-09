@@ -57,16 +57,24 @@ class BaseManager:
         )
 
     def subprocess_run(self, command: list) -> subprocess.CompletedProcess:
-        """Helper method to run a subprocess command and handle errors."""
+        """Helper method to run a subprocess command and handle errors.
+
+        Failures are normalised to RuntimeError so callers (and the CLI) never
+        surface a raw traceback from a subprocess.
+        """
         try:
             result = subprocess.run(command, capture_output=True, text=True, check=True)
             return result
         except subprocess.CalledProcessError as e:
-            print(f"Error running command: {' '.join(command)}")
-            print(f"Return code: {e.returncode}")
-            print(f"Output: {e.output}")
-            print(f"Error output: {e.stderr}")
-            raise
+            detail = (e.stderr or e.stdout or "").strip()
+            raise RuntimeError(
+                f"Command failed ({' '.join(command)}): "
+                f"{detail or f'exit code {e.returncode}'}"
+            ) from e
+        except FileNotFoundError as e:
+            raise RuntimeError(
+                f"Command not found: {command[0]}"
+            ) from e
 
     @abstractmethod
     def start(self):

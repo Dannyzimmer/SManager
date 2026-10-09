@@ -27,9 +27,7 @@ def _run_all_action(ctx: click.Context, action: str, yes: bool) -> None:
     detach_renderer = attach_cli_event_renderer(manager, command_scope="all")
     try:
         manager.manage_all(action)
-    except ValueError as e:
-        raise click.ClickException(str(e))
-    except RuntimeError as e:
+    except Exception as e:
         raise click.ClickException(str(e))
     finally:
         detach_renderer()

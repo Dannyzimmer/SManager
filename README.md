@@ -13,6 +13,7 @@ smanager group restart music
 
 ## Features
 - Unified service management for local/systemd, Docker, and PHP runtimes.
+- Per-service custom start/stop/restart/status scripts.
 - VPN integration (Tailscale provider support).
 - Interactive metadata creation and editing.
 - YAML-based global configuration.
@@ -148,8 +149,62 @@ For `runtime.type: php`, define the `php` section with:
 - `working_dir` (optional)
 - `env` (optional map of environment variables)
 
+## Custom Scripts
+Any service can override `start`, `stop`, `restart`, and/or `status` with a shell
+script. Provide any subset of them; the operations you do not override keep using
+the default mechanism for the runtime type.
+
+```json
+{
+  "scripts": {
+    "start": "scripts/start.sh",
+    "stop": "scripts/stop.sh",
+    "restart": "scripts/restart.sh",
+    "status": "scripts/status.sh",
+    "working_dir": ".",
+    "env": { "APP_ENV": "production" }
+  }
+}
+```
+
+- Values are paths to `.sh` files, relative to the service directory (or absolute).
+- Scripts run with `bash` (fallback `sh`) from `working_dir` (default: the service
+  directory), with `env` merged over the current environment.
+- `status` exit code drives the result: `0` = running, anything else = stopped.
+- A `restart` script owns the stop/start sequence; SManager still re-establishes
+  the VPN HTTPS serve afterwards when `vpn.serve_https` is enabled.
+- When `scripts.start` and `scripts.stop` are both present, `local.systemd_services`
+  and `docker.compose_file` become optional.
+
+## HTTPS over VPN without passwords
+By default SManager runs the privileged Tailscale operations **non-interactively**
+and never blocks waiting for a password:
+
+1. It first tries the command as the current user (Tailscale *operator* mode).
+2. It falls back to `sudo -n` (non-interactive; requires NOPASSWD).
+
+To avoid `sudo` entirely, once per machine run:
+
+```bash
+sudo tailscale set --operator=$USER
+```
+
+Alternatively, grant passwordless access to the Tailscale binary:
+
+```bash
+echo "$USER ALL=(root) NOPASSWD: $(command -v tailscale)" | \
+  sudo tee /etc/sudoers.d/smanager-tailscale
+sudo chmod 0440 /etc/sudoers.d/smanager-tailscale
+```
+
+`start` and `restart` (re)create the Tailscale HTTPS serve when
+`vpn.serve_https` is `true`; `stop` takes it down. If the VPN is disconnected it
+is brought up first. Failures are reported as clean errors, and a failing VPN
+serve never leaves the service itself down.
+
 ## Notes
 - `metadata init` creates a new file.
 - `metadata edit` modifies an existing file.
+- `metadata validate` checks script paths and runtime-specific rules.
 - Use command-specific `--help` for the latest options and examples.
 
