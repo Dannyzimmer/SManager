@@ -21,6 +21,12 @@ class UpdateInfo:
     latest: Optional[str] = None
     source: Optional[str] = None
     error: Optional[str] = None
+    # Nature of the current/latest values: "version", "tag" or "digest".
+    current_kind: Optional[str] = None
+    latest_kind: Optional[str] = None
+    # Digests backing the comparison, kept even when a human version is shown.
+    current_digest: Optional[str] = None
+    latest_digest: Optional[str] = None
 
 
 @dataclass

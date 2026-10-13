@@ -290,8 +290,17 @@ smanager all status --updates --json
 The JSON status gains a nested `update` object:
 
 ```json
-"update": { "available": true, "current": "1.2.0", "latest": "1.3.1", "source": "github", "error": null }
+"update": {
+  "available": true,
+  "current": "1.2.0", "current_kind": "version", "current_digest": null,
+  "latest": "1.3.1", "latest_kind": "version", "latest_digest": null,
+  "source": "github", "error": null
+}
 ```
+
+`current`/`latest` are always strings. `current_kind`/`latest_kind` describe their
+nature (`version`, `tag` or `digest`), and `current_digest`/`latest_digest` carry
+the backing images digests when the strategy has them (currently Docker).
 
 How the current/latest versions are obtained, by `version.latest.strategy`:
 
@@ -300,7 +309,10 @@ How the current/latest versions are obtained, by `version.latest.strategy`:
 - `github` — GitHub Releases API (`repo: owner/name`, or derived from a github git remote); `GITHUB_TOKEN`/`GH_TOKEN` raises the rate limit.
 - `git` — compares the local checkout with the remote branch (`git fetch` + ancestry).
 - `composer` — `composer outdated --direct --format=json`.
-- `docker` — compares local image digests with the registry (`docker buildx imagetools` / `regctl` / `crane`).
+- `docker` — reports a human version and still decides `available` by comparing image digests (`docker buildx imagetools` / `regctl` / `crane`).
+  - `current` prefers the local image OCI label `org.opencontainers.image.version` (falling back to `version`), then a version-like compose tag (e.g. `v1.2`, `1.2.3`, `2024.1`), and finally the local digest. Floating tags (`latest`, `stable`, `edge`, `nightly`, `dev`, `main`, `master`) and digest-pinned refs (`@sha256:`) are ignored.
+  - `latest` prefers the remote OCI version label (`regctl image config` / `crane config` / `skopeo inspect`), falling back to the remote digest.
+  - `current_kind`/`latest_kind` report `version`/`tag`/`digest` (or `null` when multiple images disagree), and `current_digest`/`latest_digest` always carry the digests used for the comparison.
 - `package` — `apt`/`dnf`/`pacman`/`flatpak` using `package_manager` + `package`.
 - `auto` — Docker uses the docker strategy; local/PHP detect a git remote (github → API) or a git/composer project.
 

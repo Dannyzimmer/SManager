@@ -14,6 +14,7 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
+from dataclasses import dataclass
 
 try:
     from packaging.version import InvalidVersion, Version
@@ -27,6 +28,35 @@ from ..vpn import VPNService
 
 GITHUB_API = "https://api.github.com/repos/{repo}/releases/latest"
 DEFAULT_CHECK_TIMEOUT = 5
+
+FLOATING_IMAGE_TAGS = {
+    "latest",
+    "stable",
+    "edge",
+    "nightly",
+    "dev",
+    "main",
+    "master",
+}
+
+OCI_VERSION_LABELS = ("org.opencontainers.image.version", "version")
+
+# Sentinel: ``available`` was not decided by the strategy, so it should be
+# derived from the version strings.
+_UNSET = object()
+
+
+@dataclass
+class _VersionCheck:
+    """Internal strategy result feeding ``UpdateInfo``."""
+
+    current: str | None = None
+    latest: str | None = None
+    available: object = _UNSET
+    current_kind: str | None = None
+    latest_kind: str | None = None
+    current_digest: str | None = None
+    latest_digest: str | None = None
 
 
 class BaseSDV2Manager(BaseManager):
@@ -560,13 +590,21 @@ class BaseSDV2Manager(BaseManager):
         strategy: str | None = None
         try:
             strategy = self._resolve_version_strategy()
-            current, latest, override = self._evaluate_version_strategy(strategy)
-            available = override if override is not None else self._compare_versions(current, latest)
+            result = self._evaluate_version_strategy(strategy)
+            available = (
+                self._compare_versions(result.current, result.latest)
+                if result.available is _UNSET
+                else result.available
+            )
             return UpdateInfo(
                 available=available,
-                current=current,
-                latest=latest,
+                current=result.current,
+                latest=result.latest,
                 source=strategy,
+                current_kind=result.current_kind,
+                latest_kind=result.latest_kind,
+                current_digest=result.current_digest,
+                latest_digest=result.latest_digest,
             )
         except Exception as exc:  # noqa: BLE001 - status must not fail
             return UpdateInfo(source=strategy, error=str(exc))
@@ -600,7 +638,7 @@ class BaseSDV2Manager(BaseManager):
             "or provide 'scripts.check_update'."
         )
 
-    def _evaluate_version_strategy(self, strategy: str) -> tuple[str | None, str | None, bool | None]:
+    def _evaluate_version_strategy(self, strategy: str) -> _VersionCheck:
         version = self.service.metadata.version
         latest = version.latest if version else None
         regex = version.regex if version else None
@@ -634,7 +672,7 @@ class BaseSDV2Manager(BaseManager):
         else:
             raise RuntimeError(f"Unsupported version strategy: {strategy}")
 
-        return current, latest_version, None
+        return _VersionCheck(current=current, latest=latest_version)
 
     def _current_version(self, strategy: str) -> str | None:
         version = self.service.metadata.version
@@ -835,7 +873,7 @@ class BaseSDV2Manager(BaseManager):
         except ValueError:
             return None
 
-    def _git_version_info(self, latest) -> tuple[str | None, str | None, bool | None]:
+    def _git_version_info(self, latest) -> _VersionCheck:
         path = self._update_path()
         if not os.path.isdir(os.path.join(path, ".git")):
             raise RuntimeError(
@@ -845,7 +883,7 @@ class BaseSDV2Manager(BaseManager):
         local_tag = self._git_output(path, ["describe", "--tags", "--abbrev=0"])
         remote_tags = self._git_remote_tags(path)
         if local_tag and remote_tags:
-            return local_tag, self._highest_version(remote_tags), None
+            return _VersionCheck(current=local_tag, latest=self._highest_version(remote_tags))
 
         branch = latest.branch if latest and latest.branch else None
         if not branch:
@@ -861,16 +899,19 @@ class BaseSDV2Manager(BaseManager):
         local_sha = self._git_output(path, ["rev-parse", "HEAD"])
         remote_sha = self._git_output(path, ["rev-parse", "FETCH_HEAD"])
         if not local_sha or not remote_sha:
-            return (local_sha[:12] if local_sha else None, remote_sha[:12] if remote_sha else None, None)
+            return _VersionCheck(
+                current=local_sha[:12] if local_sha else None,
+                latest=remote_sha[:12] if remote_sha else None,
+            )
         if local_sha == remote_sha:
-            return local_sha[:12], remote_sha[:12], False
+            return _VersionCheck(current=local_sha[:12], latest=remote_sha[:12], available=False)
 
         remote_ahead = self._git_count(path, "HEAD..FETCH_HEAD")
         local_ahead = self._git_count(path, "FETCH_HEAD..HEAD")
         override: bool | None = None
         if remote_ahead is not None and local_ahead is not None:
             override = remote_ahead > 0
-        return local_sha[:12], remote_sha[:12], override
+        return _VersionCheck(current=local_sha[:12], latest=remote_sha[:12], available=override)
 
     @staticmethod
     def _parse_github_repo(url: str) -> str | None:
@@ -913,7 +954,7 @@ class BaseSDV2Manager(BaseManager):
         return str(tag)
 
     # --- composer ---------------------------------------------------
-    def _composer_version_info(self) -> tuple[str | None, str | None, bool | None]:
+    def _composer_version_info(self) -> _VersionCheck:
         path = self._update_path()
         if not os.path.isfile(os.path.join(path, "composer.json")):
             raise RuntimeError(
@@ -951,11 +992,11 @@ class BaseSDV2Manager(BaseManager):
             if latest and status not in (None, "up-to-date") and str(current) != str(latest):
                 outdated.append(f"{name} {current}->{latest}")
         if outdated:
-            return "; ".join(outdated), "updates available", True
-        return "up-to-date", "up-to-date", False
+            return _VersionCheck(current="; ".join(outdated), latest="updates available", available=True)
+        return _VersionCheck(current="up-to-date", latest="up-to-date", available=False)
 
     # --- docker -----------------------------------------------------
-    def _docker_version_info(self) -> tuple[str | None, str | None, bool | None]:
+    def _docker_version_info(self) -> _VersionCheck:
         docker = self.service.metadata.docker
         if self.service.metadata.runtime.type != "docker" or not docker or not docker.compose_file:
             raise RuntimeError("version strategy 'docker' requires docker.compose_file.")
@@ -965,26 +1006,156 @@ class BaseSDV2Manager(BaseManager):
             raise RuntimeError("Could not determine images from the compose file.")
 
         outdated: list[str] = []
-        local_summaries: list[str] = []
-        remote_summaries: list[str] = []
+        current_values: list[str] = []
+        current_kinds: list[str] = []
+        current_digests: list[str] = []
+        latest_values: list[str] = []
+        latest_kinds: list[str] = []
+        latest_digests: list[str] = []
         missing_local = False
+
         for image in images:
-            local = self._docker_local_digest(image)
-            remote = self._docker_remote_digest(image)
-            if local:
-                local_summaries.append(local)
-            elif remote:
+            local_digest = self._docker_local_digest(image)
+            remote_digest = self._docker_remote_digest(image)
+
+            local_value, local_kind = self._docker_local_version(image, local_digest)
+            if local_value:
+                current_values.append(local_value)
+            if local_kind:
+                current_kinds.append(local_kind)
+            if local_digest:
+                current_digests.append(local_digest)
+            elif remote_digest:
                 missing_local = True
-            if remote:
-                remote_summaries.append(remote)
-            if local and remote and local != remote:
+
+            remote_value, remote_kind = self._docker_remote_version(image, remote_digest)
+            if remote_value:
+                latest_values.append(remote_value)
+            if remote_kind:
+                latest_kinds.append(remote_kind)
+            if remote_digest:
+                latest_digests.append(remote_digest)
+
+            if local_digest and remote_digest and local_digest != remote_digest:
                 outdated.append(image)
 
-        current = ", ".join(local_summaries) or None
-        latest = ", ".join(remote_summaries) or None
-        if not remote_summaries or missing_local:
-            return current, latest, None
-        return current, latest, bool(outdated)
+        if not latest_digests or missing_local:
+            available: bool | None = None
+        else:
+            available = bool(outdated)
+
+        return _VersionCheck(
+            current=", ".join(current_values) or None,
+            latest=", ".join(latest_values) or None,
+            available=available,
+            current_kind=self._unanimous_kind(current_kinds, len(images)),
+            latest_kind=self._unanimous_kind(latest_kinds, len(images)),
+            current_digest=", ".join(current_digests) or None,
+            latest_digest=", ".join(latest_digests) or None,
+        )
+
+    @staticmethod
+    def _unanimous_kind(kinds: list[str], expected: int) -> str | None:
+        """Return the shared kind when every image agrees, else None."""
+        if not kinds or len(kinds) != expected:
+            return None
+        first = kinds[0]
+        return first if all(kind == first for kind in kinds) else None
+
+    def _docker_local_version(self, image: str, local_digest: str | None) -> tuple[str | None, str | None]:
+        for label in OCI_VERSION_LABELS:
+            value = self._docker_image_label(image, label)
+            if value:
+                return value, "version"
+        tag = self._image_tag(image)
+        if tag and self._looks_like_version(tag) and not self._is_floating_tag(tag):
+            return tag, "tag"
+        if local_digest:
+            return local_digest, "digest"
+        return None, None
+
+    def _docker_remote_version(self, image: str, remote_digest: str | None) -> tuple[str | None, str | None]:
+        value = self._docker_remote_label(image)
+        if value:
+            return value, "version"
+        if remote_digest:
+            return remote_digest, "digest"
+        return None, None
+
+    def _docker_image_label(self, image: str, label: str) -> str | None:
+        output = self._cmd_stdout(
+            [
+                "docker", "image", "inspect", image,
+                "--format", f'{{{{ index .Config.Labels "{label}" }}}}',
+            ],
+            timeout=max(self._check_timeout, 15),
+        )
+        if not output:
+            return None
+        value = output.strip()
+        if value in {"", "<no value>", "null", "{}"}:
+            return None
+        return value
+
+    def _docker_remote_label(self, image: str) -> str | None:
+        timeout = max(self._check_timeout, 20)
+        payload = None
+        if shutil.which("regctl"):
+            payload = self._load_json(self._cmd_stdout(["regctl", "image", "config", image], timeout=timeout))
+        if payload is None and shutil.which("crane"):
+            payload = self._load_json(self._cmd_stdout(["crane", "config", image], timeout=timeout))
+        if payload is None and shutil.which("skopeo"):
+            payload = self._load_json(
+                self._cmd_stdout(["skopeo", "inspect", f"docker://{image}"], timeout=timeout)
+            )
+        if payload is None:
+            return None
+        return self._extract_oci_label(payload)
+
+    @staticmethod
+    def _load_json(output: str | None):
+        if not output:
+            return None
+        try:
+            return json.loads(output)
+        except json.JSONDecodeError:
+            return None
+
+    @staticmethod
+    def _extract_oci_label(payload) -> str | None:
+        if not isinstance(payload, dict):
+            return None
+        candidates = []
+        config = payload.get("config")
+        if isinstance(config, dict):
+            candidates.append(config.get("Labels"))
+        candidates.append(payload.get("Labels"))
+        for labels in candidates:
+            if isinstance(labels, dict):
+                for key in OCI_VERSION_LABELS:
+                    value = labels.get(key)
+                    if value:
+                        return str(value)
+        return None
+
+    @staticmethod
+    def _image_tag(image: str) -> str | None:
+        ref = image.strip()
+        if not ref or "@" in ref:
+            return None
+        last = ref.rsplit("/", 1)[-1]
+        if ":" in last:
+            tag = last.rsplit(":", 1)[1]
+            return tag or None
+        return None
+
+    @staticmethod
+    def _looks_like_version(tag: str) -> bool:
+        return bool(re.fullmatch(r"v?\d+(?:\.\d+)+(?:[-+][0-9A-Za-z.-]+)?", tag.strip()))
+
+    @staticmethod
+    def _is_floating_tag(tag: str) -> bool:
+        return tag.strip().lower() in FLOATING_IMAGE_TAGS
 
     def _docker_compose_images(self, compose_path: str) -> list[str]:
         output = self._cmd_stdout(
@@ -1029,7 +1200,7 @@ class BaseSDV2Manager(BaseManager):
         return None
 
     # --- package managers -------------------------------------------
-    def _package_version_info(self, latest) -> tuple[str | None, str | None, bool | None]:
+    def _package_version_info(self, latest) -> _VersionCheck:
         manager = latest.package_manager
         package = latest.package
         if manager == "apt":
@@ -1040,28 +1211,28 @@ class BaseSDV2Manager(BaseManager):
             candidate = re.search(r"Candidate:\s*(\S+)", output)
             current_v = current.group(1) if current else None
             latest_v = candidate.group(1) if candidate else None
-            return current_v, latest_v, None
+            return _VersionCheck(current=current_v, latest=latest_v)
         if manager == "pacman":
             current_v = self._cmd_stdout(["pacman", "-Q", package])
             current_v = current_v.split()[-1] if current_v else None
             upgradable = self._cmd_stdout(["pacman", "-Qu", package])
             latest_v = upgradable.split()[-1] if upgradable else current_v
-            return current_v, latest_v, None
+            return _VersionCheck(current=current_v, latest=latest_v)
         if manager == "dnf":
             upgradable = self._cmd_stdout(["dnf", "-q", "check-update", package])
             current_v = self._cmd_stdout(["rpm", "-q", "--qf", "%{VERSION}", package])
             if upgradable:
                 parts = upgradable.split()
                 latest_v = parts[1] if len(parts) > 1 else None
-                return current_v, latest_v, True
-            return current_v, current_v, False
+                return _VersionCheck(current=current_v, latest=latest_v, available=True)
+            return _VersionCheck(current=current_v, latest=current_v, available=False)
         if manager == "flatpak":
             info = self._cmd_stdout(["flatpak", "remote-info", "flathub", package])
             if info is None:
                 raise RuntimeError("flatpak remote-info failed.")
             latest_match = re.search(r"^\s*Version:\s*(.+)$", info, re.MULTILINE)
             latest_v = latest_match.group(1).strip() if latest_match else None
-            return None, latest_v, None
+            return _VersionCheck(latest=latest_v)
         raise RuntimeError(f"Unsupported package manager: {manager}")
 
     # ------------------------------------------------------------------
