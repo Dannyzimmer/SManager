@@ -20,6 +20,10 @@ class GlobalManager(BaseGlobalManager):
                 return service
         raise ValueError(f"Service with ID '{service_id}' not found.")
 
+    def get_service(self, service_id: str) -> Service:
+        """Public accessor returning the Service whose metadata id matches."""
+        return self._find_service_by_id(service_id)
+
     def get_service_manager(self, service: Service, restart_delay: int = 5) -> BaseManager:
         """Get the appropriate service manager for the given service based on its metadata."""
         delay = service.metadata.vpn.https_restart_delay if service.metadata.vpn and service.metadata.vpn.https_restart_delay is not None else restart_delay

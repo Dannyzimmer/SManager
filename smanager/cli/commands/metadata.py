@@ -1,21 +1,28 @@
-import click
+import json
 from pathlib import Path
-import json as json_module
-import re
-from urllib.parse import urlparse
 
+import click
 from rich.console import Console
 from rich.table import Table
 
-from ..config import get_metadata_filename
-from ..metadata_wizard import MetadataEditor, MetadataWizard
+from ..config import get_manager, get_metadata_filename
 from ...datatypes import ServiceMetadata
+from ...metadata_ops import (
+    KNOWN_TOP_LEVEL_KEYS,
+    atomic_write_json,
+    build_schema,
+    parse_json_text,
+    read_json_file,
+    render_review,
+    render_schema_table,
+    validate_metadata_dict,
+)
 
 
 @click.group("metadata")
 @click.pass_context
 def metadata_cmd(ctx: click.Context) -> None:
-    """Create and manage service metadata files interactively."""
+    """Create, inspect and manage service metadata files."""
     ctx.ensure_object(dict)
 
 
@@ -30,6 +37,8 @@ def metadata_cmd(ctx: click.Context) -> None:
 @click.pass_context
 def init_cmd(ctx: click.Context, output: Path | None) -> None:
     """Create a service metadata file using an interactive guided wizard."""
+    from ..metadata_wizard import MetadataWizard
+
     wizard = MetadataWizard(output_override=output, metadata_filename=get_metadata_filename(ctx))
     wizard.run()
 
@@ -46,135 +55,176 @@ def init_cmd(ctx: click.Context, output: Path | None) -> None:
 @click.pass_context
 def edit_cmd(ctx: click.Context, metadata_file: Path | None) -> None:
     """Edit an existing service metadata file interactively."""
+    from ..metadata_wizard import MetadataEditor
+
     editor = MetadataEditor(metadata_path=metadata_file, metadata_filename=get_metadata_filename(ctx))
     editor.run()
 
 
+@metadata_cmd.command("show")
+@click.argument("service_id")
+@click.option("--json", "as_json", is_flag=True, default=False, help="Output as JSON.")
+@click.pass_context
+def show_cmd(ctx: click.Context, service_id: str, as_json: bool) -> None:
+    """Show the metadata of a single service."""
+    manager = get_manager(ctx)
+    try:
+        service = manager.get_service(service_id)
+    except ValueError as e:
+        raise click.ClickException(str(e))
+
+    metadata_path = Path(service.service_abspath) / service.metadata_filename
+
+    if as_json:
+        try:
+            raw = read_json_file(metadata_path)
+        except ValueError as e:
+            raise click.ClickException(str(e))
+        click.echo(
+            json.dumps(
+                {
+                    "id": service.metadata.id,
+                    "path": str(metadata_path),
+                    "service_dir": str(service.service_abspath),
+                    "metadata": raw,
+                },
+                indent=2,
+            )
+        )
+        return
+
+    render_review(service.metadata, service.service_abspath, service.metadata_filename)
+
+
+def _emit_set_result(payload: dict, as_json: bool, *, success: bool) -> None:
+    if as_json:
+        click.echo(json.dumps(payload, indent=2))
+        return
+    if success:
+        click.echo(payload.get("path", "Metadata written."))
+        for warning in payload.get("warnings", []):
+            click.echo(f"Warning: {warning}", err=True)
+    else:
+        for error in payload.get("errors", []):
+            click.echo(f"Error: {error}", err=True)
+
+
+@metadata_cmd.command("set")
+@click.argument("service_id")
+@click.option(
+    "--file",
+    "input_file",
+    type=click.Path(path_type=Path, dir_okay=False, exists=True),
+    default=None,
+    metavar="PATH",
+    help="Read the metadata JSON from PATH instead of STDIN.",
+)
+@click.option("--dry-run", is_flag=True, default=False, help="Validate and report without writing.")
+@click.option("--json", "as_json", is_flag=True, default=False, help="Output as JSON.")
+@click.option(
+    "--allow-id-change",
+    is_flag=True,
+    default=False,
+    help="Allow the incoming metadata id to differ from SERVICE_ID.",
+)
+@click.pass_context
+def set_cmd(
+    ctx: click.Context,
+    service_id: str,
+    input_file: Path | None,
+    dry_run: bool,
+    as_json: bool,
+    allow_id_change: bool,
+) -> None:
+    """Replace the metadata of a service from a JSON payload (--file or STDIN)."""
+
+    def fail(errors: list[str]) -> None:
+        _emit_set_result({"success": False, "errors": errors}, as_json, success=False)
+        ctx.exit(1)
+
+    try:
+        if input_file is not None:
+            raw = read_json_file(input_file)
+        else:
+            raw = parse_json_text(click.get_text_stream("stdin").read())
+    except ValueError as e:
+        fail([str(e)])
+        return
+
+    try:
+        manager = get_manager(ctx)
+        service = manager.get_service(service_id)
+    except (click.ClickException, ValueError) as e:
+        fail([str(e)])
+        return
+
+    metadata_path = Path(service.service_abspath) / service.metadata_filename
+
+    metadata, errors = validate_metadata_dict(raw, metadata_path)
+    if errors:
+        fail(errors)
+        return
+
+    if not allow_id_change and metadata.id != service_id:
+        fail(
+            [
+                f"Metadata id '{metadata.id}' does not match service '{service_id}'. "
+                "Use --allow-id-change to override."
+            ]
+        )
+        return
+
+    warnings: list[str] = []
+    unknown = sorted(set(raw.keys()) - KNOWN_TOP_LEVEL_KEYS)
+    if unknown:
+        warnings.append(f"preserved unknown top-level keys: {', '.join(unknown)}")
+    if allow_id_change and metadata.id != service_id:
+        warnings.append(f"service id changed from '{service_id}' to '{metadata.id}'")
+
+    if dry_run:
+        _emit_set_result(
+            {
+                "success": True,
+                "path": str(metadata_path),
+                "warnings": warnings,
+                "dry_run": True,
+            },
+            as_json,
+            success=True,
+        )
+        return
+
+    try:
+        atomic_write_json(metadata_path, raw, backup=True)
+    except OSError as e:
+        fail([f"Failed to write metadata: {e}"])
+        return
+
+    _emit_set_result(
+        {
+            "success": True,
+            "path": str(metadata_path),
+            "warnings": warnings,
+            "dry_run": False,
+        },
+        as_json,
+        success=True,
+    )
+
+
+@metadata_cmd.command("schema")
+@click.option("--json", "as_json", is_flag=True, default=False, help="Output as JSON.")
+def schema_cmd(as_json: bool) -> None:
+    """Describe the metadata schema (machine readable with --json)."""
+    schema = build_schema()
+    if as_json:
+        click.echo(json.dumps(schema, indent=2))
+    else:
+        render_schema_table(schema)
+
+
 def _discover_metadata_files(root: Path, metadata_filename: str) -> list[Path]:
     return sorted(path for path in root.rglob(metadata_filename) if path.is_file())
-
-
-def _validate_php_rules(metadata: ServiceMetadata, metadata_path: Path) -> list[str]:
-    errors: list[str] = []
-    php = metadata.php
-    if php is None:
-        errors.append("runtime.type=php requires section 'php'.")
-        return errors
-
-    if not str(php.start_command or "").strip():
-        errors.append("php.start_command must be a non-empty string.")
-    if not str(php.stop_command or "").strip():
-        errors.append("php.stop_command must be a non-empty string.")
-    if php.status_command is not None and not str(php.status_command).strip():
-        errors.append("php.status_command must be a non-empty string when provided.")
-
-    if php.working_dir:
-        working_dir_path = Path(php.working_dir)
-        if not working_dir_path.is_absolute():
-            working_dir_path = metadata_path.parent / working_dir_path
-        if not working_dir_path.exists() or not working_dir_path.is_dir():
-            errors.append(f"php.working_dir does not exist or is not a directory: {working_dir_path}")
-
-    if php.healthcheck_url:
-        parsed = urlparse(php.healthcheck_url)
-        if parsed.scheme not in {"http", "https"}:
-            errors.append("php.healthcheck_url must use http or https scheme.")
-        if not parsed.netloc:
-            errors.append("php.healthcheck_url must include a host.")
-
-    return errors
-
-
-def _validate_scripts_rules(metadata: ServiceMetadata, metadata_path: Path) -> list[str]:
-    errors: list[str] = []
-    scripts = metadata.scripts
-    if scripts is None:
-        return errors
-
-    for action in ("start", "stop", "restart", "status", "update"):
-        value = getattr(scripts, action, None)
-        if value is None or not str(value).strip():
-            continue
-        script_path = Path(str(value)).expanduser()
-        if not script_path.is_absolute():
-            script_path = metadata_path.parent / script_path
-        if not script_path.is_file():
-            errors.append(f"scripts.{action} file not found: {script_path}")
-
-    if scripts.working_dir:
-        working_dir = Path(str(scripts.working_dir)).expanduser()
-        if not working_dir.is_absolute():
-            working_dir = metadata_path.parent / working_dir
-        if not working_dir.is_dir():
-            errors.append(
-                f"scripts.working_dir does not exist or is not a directory: {working_dir}"
-            )
-
-    return errors
-
-
-def _validate_update_rules(metadata: ServiceMetadata, metadata_path: Path) -> list[str]:
-    errors: list[str] = []
-    update = metadata.update
-    if update is None:
-        return errors
-
-    if update.strategy == "command" and not str(update.command or "").strip():
-        errors.append("update.command must be a non-empty string when strategy is 'command'.")
-
-    if update.args is not None and not isinstance(update.args, list):
-        errors.append("update.args must be a list when provided.")
-
-    if update.path:
-        update_path = Path(str(update.path)).expanduser()
-        if not update_path.is_absolute():
-            update_path = metadata_path.parent / update_path
-        if not update_path.is_dir():
-            errors.append(f"update.path does not exist or is not a directory: {update_path}")
-        elif update.strategy == "git" and not (update_path / ".git").is_dir():
-            errors.append(f"update.strategy 'git' but no git repository at: {update_path}")
-        elif update.strategy == "composer" and not (update_path / "composer.json").is_file():
-            errors.append(f"update.strategy 'composer' but no composer.json at: {update_path}")
-
-    return errors
-
-
-def _validate_version_rules(metadata: ServiceMetadata, metadata_path: Path) -> list[str]:
-    errors: list[str] = []
-    version = metadata.version
-    if version is None:
-        return errors
-
-    if version.regex is not None:
-        try:
-            re.compile(version.regex)
-        except re.error as exc:
-            errors.append(f"version.regex is not valid: {exc}")
-
-    latest = version.latest
-    if latest is None:
-        return errors
-
-    if latest.strategy == "script" and not (
-        metadata.scripts and metadata.scripts.overrides("check_update")
-    ):
-        errors.append("version.latest.strategy 'script' requires 'scripts.check_update'.")
-    if latest.strategy == "github" and latest.repo and "/" not in latest.repo:
-        errors.append("version.latest.repo must use the 'owner/name' format.")
-    if latest.strategy == "package":
-        if latest.package_manager not in ("apt", "dnf", "pacman", "flatpak"):
-            errors.append("version.latest.package_manager must be apt, dnf, pacman or flatpak.")
-        if not str(latest.package or "").strip():
-            errors.append("version.latest.package is required when strategy is 'package'.")
-
-    if latest.path:
-        latest_path = Path(str(latest.path)).expanduser()
-        if not latest_path.is_absolute():
-            latest_path = metadata_path.parent / latest_path
-        if not latest_path.is_dir():
-            errors.append(f"version.latest.path does not exist or is not a directory: {latest_path}")
-
-    return errors
 
 
 def _validate_metadata_file(path: Path) -> dict:
@@ -182,8 +232,8 @@ def _validate_metadata_file(path: Path) -> dict:
     metadata: ServiceMetadata | None = None
 
     try:
-        raw_data = json_module.loads(path.read_text(encoding="utf-8"))
-    except json_module.JSONDecodeError as exc:
+        raw_data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
         errors.append(f"Invalid JSON: {exc}")
         return {
             "path": str(path),
@@ -200,20 +250,9 @@ def _validate_metadata_file(path: Path) -> dict:
             "errors": errors,
         }
 
-    try:
-        metadata = ServiceMetadata.from_dict(raw_data)
-    except ValueError as exc:
-        errors.append(str(exc))
+    metadata, errors = validate_metadata_dict(raw_data, path)
 
     runtime_type = metadata.runtime.type if metadata else str(raw_data.get("runtime", {}).get("type", "unknown"))
-
-    if metadata and runtime_type == "php":
-        errors.extend(_validate_php_rules(metadata, path))
-
-    if metadata:
-        errors.extend(_validate_scripts_rules(metadata, path))
-        errors.extend(_validate_update_rules(metadata, path))
-        errors.extend(_validate_version_rules(metadata, path))
 
     return {
         "path": str(path),
@@ -282,7 +321,7 @@ def validate_cmd(
     invalid_found = any(not item["valid"] for item in results)
 
     if as_json:
-        click.echo(json_module.dumps(results, indent=2))
+        click.echo(json.dumps(results, indent=2))
     else:
         _render_validation_table(results)
 

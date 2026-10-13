@@ -22,6 +22,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from ..datatypes import ServiceMetadata
+from ..metadata_ops import render_review
 
 
 KNOWN_PORTS = {
@@ -498,65 +499,7 @@ class MetadataWizard:
         return service_dir / metadata_filename
 
     def _render_review(self, metadata: ServiceMetadata, service_dir: Path, metadata_filename: str) -> None:
-        table = Table(title="Review", header_style="bold cyan", show_lines=False)
-        table.add_column("Field", style="bold")
-        table.add_column("Value")
-
-        runtime = metadata.runtime.type
-        runtime_details = f"{runtime} ({metadata.runtime.sys_user}/{metadata.runtime.sys_group}, port {metadata.runtime.ports.webui})"
-        table.add_row("ID", metadata.id)
-        table.add_row("Name", metadata.name)
-        table.add_row("Description", metadata.description)
-        table.add_row("Runtime", runtime_details)
-        table.add_row("Service dir", str(service_dir))
-        table.add_row("Metadata file", metadata_filename)
-        table.add_row("Groups", ", ".join(metadata.groups or []) or "-")
-        table.add_row("Depends on", ", ".join(metadata.depends_on or []) or "-")
-        if metadata.vpn is not None:
-            table.add_row("VPN", f"serve_https={metadata.vpn.serve_https}, delay={metadata.vpn.https_restart_delay}")
-        else:
-            table.add_row("VPN", "-")
-
-        if metadata.docker is not None:
-            table.add_row("Docker compose", metadata.docker.compose_file or "-")
-            table.add_row("Containers", ", ".join(metadata.docker.containers or []) or "-")
-        if metadata.local is not None:
-            table.add_row("Installation path", metadata.local.installation_path or "-")
-            table.add_row("Appdata path", metadata.local.appdata_path or "-")
-            table.add_row("Systemd services", ", ".join(metadata.local.systemd_services or []) or "-")
-        if metadata.php is not None:
-            table.add_row("PHP start command", metadata.php.start_command or "-")
-            table.add_row("PHP stop command", metadata.php.stop_command or "-")
-            table.add_row("PHP status command", metadata.php.status_command or "-")
-            table.add_row("Healthcheck", metadata.php.healthcheck_url or "-")
-            table.add_row("Healthcheck timeout", str(metadata.php.healthcheck_timeout))
-            table.add_row("Working dir", metadata.php.working_dir or "-")
-
-        if metadata.scripts is not None:
-            table.add_row("Script start", metadata.scripts.start or "-")
-            table.add_row("Script stop", metadata.scripts.stop or "-")
-            table.add_row("Script restart", metadata.scripts.restart or "-")
-            table.add_row("Script status", metadata.scripts.status or "-")
-            table.add_row("Script update", metadata.scripts.update or "-")
-            table.add_row("Script working dir", metadata.scripts.working_dir or "-")
-
-        if metadata.update is not None:
-            table.add_row("Update strategy", metadata.update.strategy)
-            table.add_row("Update command", metadata.update.command or "-")
-            table.add_row("Update path", metadata.update.path or "-")
-            table.add_row("Update branch", metadata.update.branch or "-")
-
-        if metadata.version is not None:
-            table.add_row("Current version command", metadata.version.current_command or "-")
-            table.add_row("Version regex", metadata.version.regex or "-")
-            if metadata.version.latest is not None:
-                table.add_row("Latest version strategy", metadata.version.latest.strategy)
-                table.add_row("Latest version repo", metadata.version.latest.repo or "-")
-                table.add_row("Latest version command", metadata.version.latest.command or "-")
-                table.add_row("Latest version path", metadata.version.latest.path or "-")
-
-        table.add_row("Active", "yes" if metadata.active else "no")
-        self.console.print(table)
+        render_review(metadata, service_dir, metadata_filename, console=self.console)
 
     def _dedupe(self, values: list[str]) -> list[str]:
         deduped: list[str] = []

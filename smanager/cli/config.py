@@ -47,11 +47,15 @@ def resolve_config_path(config_path: str | None) -> str:
 def build_manager(config_path: str | None) -> GlobalManager:
     """Resolve a config file and return an initialised GlobalManager."""
     path = resolve_config_path(config_path)
-    with open(path) as f:
-        try:
-            config = GlobalConfig.from_yaml(f.read())
-        except ValueError as e:
-            raise click.ClickException(str(e))
+    try:
+        with open(path) as f:
+            raw_config = f.read()
+    except OSError as e:
+        raise click.ClickException(f"Cannot read config file '{path}': {e}")
+    try:
+        config = GlobalConfig.from_yaml(raw_config)
+    except ValueError as e:
+        raise click.ClickException(str(e))
     if not config.services_root:
         raise click.ClickException("'services_root' is not set in the config file.")
     if not os.path.isdir(config.services_root):
@@ -90,9 +94,13 @@ def get_metadata_filename(ctx: click.Context) -> str:
         path = resolve_config_path(config_path)
     except click.ClickException:
         return GlobalConfig.__dataclass_fields__["metadata_filename"].default
-    with open(path) as f:
-        try:
-            config = GlobalConfig.from_yaml(f.read())
-        except ValueError as e:
-            raise click.ClickException(str(e))
+    try:
+        with open(path) as f:
+            raw_config = f.read()
+    except OSError as e:
+        raise click.ClickException(f"Cannot read config file '{path}': {e}")
+    try:
+        config = GlobalConfig.from_yaml(raw_config)
+    except ValueError as e:
+        raise click.ClickException(str(e))
     return config.metadata_filename

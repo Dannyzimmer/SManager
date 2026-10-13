@@ -17,7 +17,7 @@ smanager group restart music
 - One-command updates (Docker Compose out of the box, opt-in git/composer heuristics).
 - Update-availability detection in `status` (Docker digests, git, GitHub releases, composer, scripts).
 - VPN integration (Tailscale provider support).
-- Interactive metadata creation and editing.
+- Interactive metadata creation and editing, plus non-interactive `show`/`set`/`schema` with JSON output for panels and automation.
 - YAML-based global configuration.
 - Rich service status reporting with optional JSON output.
 
@@ -91,7 +91,64 @@ smanager service info <service_id> --details
 ```
 
 ## Metadata Commands
-The `metadata` group provides interactive workflows for service metadata files.
+The `metadata` group provides both interactive workflows and non-interactive,
+machine-friendly commands for service metadata files.
+
+### Non-interactive commands (for panels / automation)
+These commands never prompt and are safe to run without a TTY. With `--json`,
+they write a single JSON document to stdout and send human errors to stderr.
+
+```bash
+smanager --config /path/smanager.yaml metadata show <service_id> --json
+smanager --config /path/smanager.yaml metadata set <service_id> --json   # JSON on stdin
+smanager --config /path/smanager.yaml metadata schema --json
+```
+
+#### `metadata show <service_id> [--json]`
+Locates the service by `id` and returns its metadata file.
+
+```json
+{
+  "id": "sonarr",
+  "path": "/srv/services/sonarr/sd_info.json",
+  "service_dir": "/srv/services/sonarr",
+  "metadata": { "...": "raw file content, unknown keys preserved" }
+}
+```
+
+Without `--json` it prints a readable review table.
+
+#### `metadata set <service_id> [--file PATH] [--dry-run] [--json] [--allow-id-change]`
+Reads a metadata JSON object from `--file` or stdin (default), validates it with
+the same rules as `metadata validate`, and writes it atomically (temp file in the
+same directory + `os.replace`) keeping a `<metadata>.bak` backup. The received
+object is written verbatim so **unknown keys are preserved**.
+
+- Validation failure: `{"success": false, "errors": ["..."]}` and exit code `1` (nothing is written).
+- `metadata.id` must equal `<service_id>` unless `--allow-id-change` is passed.
+- `--dry-run` validates and reports without writing (no backup either).
+- Success: `{"success": true, "path": "...", "warnings": ["..."], "dry_run": false}`.
+
+Errors such as a missing service, unreadable stdin, or an unknown config path are
+also reported as `{"success": false, "errors": [...]}` when `--json` is used.
+
+#### `metadata schema [--json]`
+Prints a machine-readable description of the schema (sections, field paths and
+types, enums, defaults, and per-runtime requirements) suitable for generating
+forms in a UI.
+
+```json
+{
+  "schema_version": 2,
+  "enums": { "runtime_type": ["docker", "local", "php"], "update_strategy": ["..."], "version_strategy": ["..."], "package_manager": ["..."] },
+  "scripts": { "actions": ["start", "stop", "restart", "status", "update", "check_update"] },
+  "runtime_requirements": { "docker": { "required": ["docker.compose_file"], "unless": ["scripts.start", "scripts.stop"] } },
+  "fields": [ { "path": "runtime.type", "type": "enum", "enum": "runtime_type", "required": true } ]
+}
+```
+
+### Interactive commands
+The following commands are interactive (require a TTY).
 
 ### Create Metadata
 ```bash
