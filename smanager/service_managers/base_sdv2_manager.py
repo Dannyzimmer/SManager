@@ -65,6 +65,7 @@ class BaseSDV2Manager(BaseManager):
         self.service = service
         self.vpn = vpn
         self.restart_delay = restart_delay
+        self.systemd_privilege = "auto"
 
     def enable(self):
         """Change the JSON config to set the service as active."""
@@ -203,6 +204,7 @@ class BaseSDV2Manager(BaseManager):
             phase="before",
             service_id=self.get_id(),
         )
+        stop_warning: str | None = None
         try:
             if self._run_script("restart"):
                 if self._serve_https_enabled():
@@ -211,9 +213,17 @@ class BaseSDV2Manager(BaseManager):
             else:
                 try:
                     self.stop()
-                except Exception:
-                    pass
-                self.start()
+                except Exception as stop_exc:  # keep going, but do not hide it
+                    stop_warning = str(stop_exc)
+                try:
+                    self.start()
+                except Exception as start_exc:
+                    if stop_warning:
+                        raise RuntimeError(
+                            f"restart failed: stop error: {stop_warning}; "
+                            f"start error: {start_exc}"
+                        ) from start_exc
+                    raise
         except Exception as exc:
             self._emit_event(
                 scope="service",
@@ -228,6 +238,7 @@ class BaseSDV2Manager(BaseManager):
             action="restart",
             phase="after",
             service_id=self.get_id(),
+            payload={"stop_warning": stop_warning} if stop_warning else {},
         )
 
     def update(self, dry_run: bool = False):

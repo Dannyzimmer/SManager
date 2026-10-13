@@ -198,10 +198,16 @@ class MetadataWizard:
             installation_path = self._ask_text("Installation path", f"/opt/{service_id}")
             appdata_path = self._ask_text("Appdata path", f"/var/lib/{service_id}")
             systemd_services = parse_csv(self._ask_text("Systemd services (comma-separated)", service_id))
+            privilege = self._ask_select(
+                "Systemd privilege",
+                ["auto", "sudo", "none"],
+                "auto",
+            )
             local_section = {
                 "installation_path": installation_path,
                 "appdata_path": appdata_path,
                 "systemd_services": systemd_services or [service_id],
+                "privilege": privilege,
             }
         else:
             start_command = self._ask_text("Start command", f"php-fpm --fpm-config /etc/php-fpm/{service_id}.conf")
@@ -652,7 +658,12 @@ class MetadataEditor(MetadataWizard):
                     "php.working_dir",
                 ]
             else:
-                field_keys = ["local.installation_path", "local.appdata_path", "local.systemd_services"]
+                field_keys = [
+                    "local.installation_path",
+                    "local.appdata_path",
+                    "local.systemd_services",
+                    "local.privilege",
+                ]
         elif section_key == "Scripts":
             field_keys = [
                 "scripts.start",
@@ -847,6 +858,12 @@ class MetadataEditor(MetadataWizard):
                 services = local.get("systemd_services") or [service_id]
                 parsed = parse_csv(self._ask_text("Systemd services (comma-separated)", ", ".join(services)))
                 local["systemd_services"] = parsed or [service_id]
+            elif subfield == "privilege":
+                local["privilege"] = self._ask_select(
+                    "Systemd privilege",
+                    ["auto", "sudo", "none"],
+                    str(local.get("privilege", "auto")),
+                )
             return
 
         if section_key == "Scripts":

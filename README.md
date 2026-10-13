@@ -358,6 +358,53 @@ sudo chmod 0440 /etc/sudoers.d/smanager-tailscale
 is brought up first. Failures are reported as clean errors, and a failing VPN
 serve never leaves the service itself down.
 
+## Managing systemd services without prompts
+Starting or stopping a **system** unit (`systemctl start/stop <unit>`) requires
+authorization via polkit, which cannot prompt outside an interactive local
+session (for example over SSH). SManager therefore runs `systemctl` using the
+same non-interactive strategy as Tailscale and never blocks on a password:
+
+1. It first runs `systemctl <verb> <unit>` as the current user.
+2. If that fails (permissions), it falls back to `sudo -n systemctl <verb> <unit>`.
+
+The strategy is controlled by `local.privilege` per service (`auto`, `sudo` or
+`none`) and by the global `systemd_privilege` default in `smanager.yaml`:
+
+```yaml
+global:
+  services_root: "/srv/services"
+  systemd_privilege: "auto"   # auto | sudo | none
+```
+
+```json
+{
+  "local": {
+    "systemd_services": ["main_menu.service"],
+    "privilege": "auto"
+  }
+}
+```
+
+- `auto` (default): direct, then `sudo -n`.
+- `sudo`: always `sudo -n`.
+- `none`: direct only (no sudo).
+
+To make it work unattended, grant passwordless access scoped to the units you
+manage (prefer the specific units over the whole binary):
+
+```bash
+sudo tee /etc/sudoers.d/smanager-main_menu >/dev/null <<'EOF'
+Cmnd_Alias SMANAGER_MAIN_MENU = /usr/bin/systemctl start main_menu.service, \
+  /usr/bin/systemctl stop main_menu.service, /usr/bin/systemctl restart main_menu.service
+your_user ALL=(root) NOPASSWD: SMANAGER_MAIN_MENU
+EOF
+sudo chmod 0440 /etc/sudoers.d/smanager-main_menu
+```
+
+Alternatively, add a polkit rule granting `org.freedesktop.systemd1.manage-units`
+for that unit to your user. `systemctl is-active` (used by `status`) never needs
+privileges.
+
 ## Notes
 - `metadata init` creates a new file.
 - `metadata edit` modifies an existing file.

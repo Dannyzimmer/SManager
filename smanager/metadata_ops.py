@@ -20,6 +20,7 @@ from .datatypes import ServiceMetadata
 from .datatypes.sd_info_v2 import (
     ADDITIONAL_REQUIRED_SCRIPTS,
     PACKAGE_MANAGERS,
+    SYSTEMD_PRIVILEGES,
     UPDATE_STRATEGIES,
     VERSION_STRATEGIES,
 )
@@ -290,6 +291,7 @@ def render_review(metadata: ServiceMetadata, service_dir, metadata_filename: str
         table.add_row("Installation path", metadata.local.installation_path or "-")
         table.add_row("Appdata path", metadata.local.appdata_path or "-")
         table.add_row("Systemd services", ", ".join(metadata.local.systemd_services or []) or "-")
+        table.add_row("Systemd privilege", metadata.local.privilege or "auto")
     if metadata.php is not None:
         table.add_row("PHP start command", metadata.php.start_command or "-")
         table.add_row("PHP stop command", metadata.php.stop_command or "-")
@@ -359,6 +361,7 @@ def build_schema() -> dict:
         _field("local.installation_path", "local", "string"),
         _field("local.appdata_path", "local", "string"),
         _field("local.systemd_services", "local", "list[string]", description="Required for local runtime unless scripts.start/stop are set"),
+        _field("local.privilege", "local", "enum", enum="systemd_privilege", default="auto"),
         _field("php.start_command", "php", "string", description="Required for php runtime unless scripts.start is set"),
         _field("php.stop_command", "php", "string", description="Required for php runtime unless scripts.stop is set"),
         _field("php.status_command", "php", "string"),
@@ -401,6 +404,7 @@ def build_schema() -> dict:
             "version_strategy": list(VERSION_STRATEGIES),
             "package_manager": list(PACKAGE_MANAGERS),
             "script_action": list(ADDITIONAL_REQUIRED_SCRIPTS),
+            "systemd_privilege": list(SYSTEMD_PRIVILEGES),
         },
         "scripts": {"actions": list(ADDITIONAL_REQUIRED_SCRIPTS)},
         "runtime_requirements": {

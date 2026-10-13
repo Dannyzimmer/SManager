@@ -48,19 +48,31 @@ class DockerSection:
             compose_file=data.get('compose_file')
         )
 
+SYSTEMD_PRIVILEGES = ("auto", "sudo", "none")
+
+
 @dataclass
 class LocalSection:
     installation_path: Optional[str] = None
     appdata_path: Optional[str] = None
     systemd_services: Optional[list] = None
+    privilege: Optional[str] = None
 
     @classmethod
     def from_dict(cls, data: dict) -> 'LocalSection':
         return cls(
             installation_path=data.get('installation_path'),
             appdata_path=data.get('appdata_path'),
-            systemd_services=data.get('systemd_services')
+            systemd_services=data.get('systemd_services'),
+            privilege=data.get('privilege'),
         )
+
+    def __post_init__(self):
+        if self.privilege is not None and self.privilege not in SYSTEMD_PRIVILEGES:
+            raise ValueError(
+                "LocalSection 'privilege' must be one of "
+                f"{', '.join(SYSTEMD_PRIVILEGES)}."
+            )
 
 
 ADDITIONAL_REQUIRED_SCRIPTS = ("start", "stop", "restart", "status", "update", "check_update")

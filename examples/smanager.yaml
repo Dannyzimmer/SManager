@@ -7,3 +7,7 @@ global:
 
   # Filename for service metadata files. Each service should have a metadata file with this name in its directory.
   metadata_filename: "sd_info.json"
+
+  # Default privilege strategy for systemctl (local services): auto | sudo | none.
+  # Overridable per service with "local.privilege".
+  systemd_privilege: "auto"

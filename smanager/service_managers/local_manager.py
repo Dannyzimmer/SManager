@@ -1,5 +1,6 @@
 from . import BaseSDV2Manager
 from ..datatypes import Service
+from ..datatypes.sd_info_v2 import SYSTEMD_PRIVILEGES
 from ..vpn import VPNService
 import subprocess
 from ..datatypes import ServiceStatus, SingleStatus
@@ -21,13 +22,58 @@ class LocalManager(BaseSDV2Manager):
             )
         return local_metadata.systemd_services
 
+    def _privilege(self) -> str:
+        local_metadata = self.service.metadata.local
+        privilege = (local_metadata.privilege if local_metadata else None) or getattr(
+            self, "systemd_privilege", None
+        ) or "auto"
+        return privilege if privilege in SYSTEMD_PRIVILEGES else "auto"
+
+    def _systemd_candidates(self, verb: str, unit: str) -> list[list[str]]:
+        direct = ["systemctl", verb, unit]
+        sudo = ["sudo", "-n", "systemctl", verb, unit]
+        privilege = self._privilege()
+        if privilege == "sudo":
+            return [sudo]
+        if privilege == "none":
+            return [direct]
+        return [direct, sudo]
+
+    def _run_systemd(self, verb: str, unit: str) -> subprocess.CompletedProcess:
+        """Run a mutating systemctl command, avoiding interactive prompts.
+
+        Tries the strategies allowed by ``local.privilege`` (or the global
+        ``systemd_privilege`` default) and raises an actionable error when none
+        succeed. Never blocks on an interactive password prompt (``sudo -n``).
+        """
+        errors: list[str] = []
+        for command in self._systemd_candidates(verb, unit):
+            try:
+                return subprocess.run(
+                    command,
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+            except FileNotFoundError:
+                errors.append(f"{command[0]}: command not found")
+            except subprocess.CalledProcessError as exc:
+                detail = (exc.stderr or exc.stdout or "").strip()
+                errors.append(f"{' '.join(command)}: {detail or f'exit code {exc.returncode}'}")
+
+        raise RuntimeError(
+            f"Failed to run 'systemctl {verb} {unit}': " + "; ".join(errors) + ". "
+            "Configure unattended access with a NOPASSWD sudoers entry for systemctl "
+            "(scoped to this unit) or set 'local.privilege' on the service."
+        )
+
     def _start_runtime(self):
         for service_name in self._get_systemd_services():
-            self.subprocess_run(["systemctl", "start", service_name])
+            self._run_systemd("start", service_name)
 
     def _stop_runtime(self):
         for service_name in self._get_systemd_services():
-            self.subprocess_run(["systemctl", "stop", service_name])
+            self._run_systemd("stop", service_name)
 
     def status(self) -> ServiceStatus:
         """Check the status of the local systemd service and return a ServiceStatus object."""

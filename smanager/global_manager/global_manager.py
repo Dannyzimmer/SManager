@@ -28,12 +28,14 @@ class GlobalManager(BaseGlobalManager):
         """Get the appropriate service manager for the given service based on its metadata."""
         delay = service.metadata.vpn.https_restart_delay if service.metadata.vpn and service.metadata.vpn.https_restart_delay is not None else restart_delay
         manager_class = get_service_manager_class(service.metadata.runtime.type)
-        return manager_class(
+        manager = manager_class(
             service,
             self.vpn,
             restart_delay=delay,
             event_dispatcher=self.event_dispatcher,
         )
+        manager.systemd_privilege = getattr(self.global_config, "systemd_privilege", "auto")
+        return manager
         
     def get_group(self, group_name: str) -> list[Service]:
         """Get all services that belong to the specified group."""
