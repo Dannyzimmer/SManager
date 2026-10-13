@@ -1,6 +1,7 @@
 import click
 from pathlib import Path
 import json as json_module
+import re
 from urllib.parse import urlparse
 
 from rich.console import Console
@@ -138,6 +139,44 @@ def _validate_update_rules(metadata: ServiceMetadata, metadata_path: Path) -> li
     return errors
 
 
+def _validate_version_rules(metadata: ServiceMetadata, metadata_path: Path) -> list[str]:
+    errors: list[str] = []
+    version = metadata.version
+    if version is None:
+        return errors
+
+    if version.regex is not None:
+        try:
+            re.compile(version.regex)
+        except re.error as exc:
+            errors.append(f"version.regex is not valid: {exc}")
+
+    latest = version.latest
+    if latest is None:
+        return errors
+
+    if latest.strategy == "script" and not (
+        metadata.scripts and metadata.scripts.overrides("check_update")
+    ):
+        errors.append("version.latest.strategy 'script' requires 'scripts.check_update'.")
+    if latest.strategy == "github" and latest.repo and "/" not in latest.repo:
+        errors.append("version.latest.repo must use the 'owner/name' format.")
+    if latest.strategy == "package":
+        if latest.package_manager not in ("apt", "dnf", "pacman", "flatpak"):
+            errors.append("version.latest.package_manager must be apt, dnf, pacman or flatpak.")
+        if not str(latest.package or "").strip():
+            errors.append("version.latest.package is required when strategy is 'package'.")
+
+    if latest.path:
+        latest_path = Path(str(latest.path)).expanduser()
+        if not latest_path.is_absolute():
+            latest_path = metadata_path.parent / latest_path
+        if not latest_path.is_dir():
+            errors.append(f"version.latest.path does not exist or is not a directory: {latest_path}")
+
+    return errors
+
+
 def _validate_metadata_file(path: Path) -> dict:
     errors: list[str] = []
     metadata: ServiceMetadata | None = None
@@ -174,6 +213,7 @@ def _validate_metadata_file(path: Path) -> dict:
     if metadata:
         errors.extend(_validate_scripts_rules(metadata, path))
         errors.extend(_validate_update_rules(metadata, path))
+        errors.extend(_validate_version_rules(metadata, path))
 
     return {
         "path": str(path),

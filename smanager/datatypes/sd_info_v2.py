@@ -63,9 +63,23 @@ class LocalSection:
         )
 
 
-ADDITIONAL_REQUIRED_SCRIPTS = ("start", "stop", "restart", "status", "update")
+ADDITIONAL_REQUIRED_SCRIPTS = ("start", "stop", "restart", "status", "update", "check_update")
 
 UPDATE_STRATEGIES = ("auto", "docker", "git", "composer", "command", "none")
+
+VERSION_STRATEGIES = (
+    "auto",
+    "docker",
+    "git",
+    "composer",
+    "github",
+    "command",
+    "script",
+    "package",
+    "none",
+)
+
+PACKAGE_MANAGERS = ("apt", "dnf", "pacman", "flatpak")
 
 
 @dataclass
@@ -75,6 +89,7 @@ class ScriptSection:
     restart: Optional[str] = None
     status: Optional[str] = None
     update: Optional[str] = None
+    check_update: Optional[str] = None
     working_dir: Optional[str] = None
     env: Optional[dict] = None
 
@@ -86,6 +101,7 @@ class ScriptSection:
             restart=data.get('restart'),
             status=data.get('status'),
             update=data.get('update'),
+            check_update=data.get('check_update'),
             working_dir=data.get('working_dir'),
             env=data.get('env'),
         )
@@ -138,6 +154,85 @@ class UpdateSection:
 
 
 @dataclass
+class LatestVersionSection:
+    """How to obtain the latest available version of a service."""
+
+    strategy: str = "auto"
+    repo: Optional[str] = None
+    command: Optional[str] = None
+    path: Optional[str] = None
+    branch: Optional[str] = None
+    package_manager: Optional[str] = None
+    package: Optional[str] = None
+    args: Optional[list] = None
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'LatestVersionSection':
+        return cls(
+            strategy=data.get('strategy', 'auto'),
+            repo=data.get('repo'),
+            command=data.get('command'),
+            path=data.get('path'),
+            branch=data.get('branch'),
+            package_manager=data.get('package_manager'),
+            package=data.get('package'),
+            args=data.get('args'),
+        )
+
+    def __post_init__(self):
+        if self.strategy not in VERSION_STRATEGIES:
+            raise ValueError(
+                "LatestVersionSection 'strategy' must be one of "
+                f"{', '.join(VERSION_STRATEGIES)}."
+            )
+        if self.strategy == "command" and (not self.command or not str(self.command).strip()):
+            raise ValueError(
+                "LatestVersionSection with strategy 'command' must define a non-empty 'command'."
+            )
+        if self.strategy == "github":
+            if self.repo is not None and not str(self.repo).strip():
+                raise ValueError("LatestVersionSection 'repo' must be non-empty when provided.")
+        if self.strategy == "package":
+            if self.package_manager not in PACKAGE_MANAGERS:
+                raise ValueError(
+                    "LatestVersionSection with strategy 'package' must define "
+                    f"'package_manager' as one of {', '.join(PACKAGE_MANAGERS)}."
+                )
+            if not self.package or not str(self.package).strip():
+                raise ValueError(
+                    "LatestVersionSection with strategy 'package' must define a non-empty 'package'."
+                )
+        if self.args is not None and not isinstance(self.args, list):
+            raise ValueError("LatestVersionSection 'args' must be a list when provided.")
+
+
+@dataclass
+class VersionSection:
+    """Opt-in configuration for checking whether an update is available."""
+
+    current_command: Optional[str] = None
+    regex: Optional[str] = None
+    latest: Optional[LatestVersionSection] = None
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'VersionSection':
+        latest_data = data.get('latest')
+        return cls(
+            current_command=data.get('current_command'),
+            regex=data.get('regex'),
+            latest=LatestVersionSection.from_dict(latest_data) if latest_data is not None else None,
+        )
+
+    def __post_init__(self):
+        if self.regex is not None:
+            import re as _re
+            try:
+                _re.compile(self.regex)
+            except _re.error as exc:
+                raise ValueError(f"VersionSection 'regex' is not valid: {exc}") from exc
+
+
+@dataclass
 class PHPSection:
     start_command: Optional[str] = None
     stop_command: Optional[str] = None
@@ -184,6 +279,7 @@ class ServiceMetadata:
     php: Optional[PHPSection] = None
     scripts: Optional[ScriptSection] = None
     update: Optional[UpdateSection] = None
+    version: Optional[VersionSection] = None
     vpn: Optional[VPNSection] = None
     depends_on: Optional[list] = None
 
@@ -310,6 +406,9 @@ class ServiceMetadata:
         update_data = data.get('update')
         update = UpdateSection.from_dict(update_data) if update_data is not None else None
 
+        version_data = data.get('version')
+        version = VersionSection.from_dict(version_data) if version_data is not None else None
+
         vpn_data = data.get('vpn')
         vpn = VPNSection(**vpn_data) if vpn_data is not None else None
 
@@ -326,6 +425,7 @@ class ServiceMetadata:
             php=php,
             scripts=scripts,
             update=update,
+            version=version,
             vpn=vpn,
             depends_on=data.get('depends_on')
         )

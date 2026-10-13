@@ -223,6 +223,7 @@ class MetadataWizard:
             scripts_section = self._ask_scripts()
 
         update_section = self._ask_update_section()
+        version_section = self._ask_version_section()
 
         available_groups = self._existing_groups(service_dir)
         available_dependencies = self._existing_dependencies(service_dir, service_id)
@@ -263,6 +264,8 @@ class MetadataWizard:
             metadata_dict["scripts"] = scripts_section
         if update_section is not None:
             metadata_dict["update"] = update_section
+        if version_section is not None:
+            metadata_dict["version"] = version_section
 
         metadata = ServiceMetadata.from_dict(metadata_dict)
         self._render_review(metadata, service_dir, metadata_filename)
@@ -318,7 +321,7 @@ class MetadataWizard:
 
     def _ask_scripts(self) -> dict[str, Any] | None:
         section: dict[str, Any] = {}
-        for action in ("start", "stop", "restart", "status", "update"):
+        for action in ("start", "stop", "restart", "status", "update", "check_update"):
             value = self._ask_text(f"{action.capitalize()} script (.sh path, optional)", "").strip()
             if value:
                 section[action] = value
@@ -347,6 +350,42 @@ class MetadataWizard:
             branch = self._ask_text("Git branch (optional)", "").strip()
             if branch:
                 section["branch"] = branch
+        return section
+
+    def _ask_version_section(self) -> dict[str, Any] | None:
+        if not self._ask_confirm("Configure update checks (status --updates)", False):
+            return None
+
+        section: dict[str, Any] = {}
+        current_command = self._ask_text("Current version command (optional)", "").strip()
+        if current_command:
+            section["current_command"] = current_command
+        regex = self._ask_text("Version regex (optional)", "").strip()
+        if regex:
+            section["regex"] = regex
+
+        strategy = self._ask_select(
+            "Latest version strategy",
+            ["auto", "docker", "git", "composer", "github", "command", "script", "package", "none"],
+            "auto",
+        )
+        latest: dict[str, Any] = {"strategy": strategy}
+        if strategy == "github":
+            repo = self._ask_text("GitHub repo (owner/name)", "").strip()
+            if repo:
+                latest["repo"] = repo
+        elif strategy == "command":
+            latest["command"] = self._ask_text("Latest version command", "").strip()
+        elif strategy in {"git", "composer"}:
+            path = self._ask_text("Path (optional)", "").strip()
+            if path:
+                latest["path"] = path
+        elif strategy == "package":
+            latest["package_manager"] = self._ask_select(
+                "Package manager", ["apt", "dnf", "pacman", "flatpak"], "apt"
+            )
+            latest["package"] = self._ask_text("Package name", "").strip()
+        section["latest"] = latest
         return section
 
     def _ask_select(
@@ -507,6 +546,15 @@ class MetadataWizard:
             table.add_row("Update path", metadata.update.path or "-")
             table.add_row("Update branch", metadata.update.branch or "-")
 
+        if metadata.version is not None:
+            table.add_row("Current version command", metadata.version.current_command or "-")
+            table.add_row("Version regex", metadata.version.regex or "-")
+            if metadata.version.latest is not None:
+                table.add_row("Latest version strategy", metadata.version.latest.strategy)
+                table.add_row("Latest version repo", metadata.version.latest.repo or "-")
+                table.add_row("Latest version command", metadata.version.latest.command or "-")
+                table.add_row("Latest version path", metadata.version.latest.path or "-")
+
         table.add_row("Active", "yes" if metadata.active else "no")
         self.console.print(table)
 
@@ -601,6 +649,7 @@ class MetadataEditor(MetadataWizard):
             "Runtime details",
             "Scripts",
             "Update",
+            "Version",
             "Groups",
             "Depends on",
             vpn_label,
@@ -676,6 +725,17 @@ class MetadataEditor(MetadataWizard):
                 "update.path",
                 "update.branch",
             ]
+        elif section_key == "Version":
+            field_keys = [
+                "version.current_command",
+                "version.regex",
+                "version.latest.strategy",
+                "version.latest.repo",
+                "version.latest.command",
+                "version.latest.path",
+                "version.latest.package_manager",
+                "version.latest.package",
+            ]
         elif section_key == "Groups":
             field_keys = ["groups"]
         elif section_key == "Depends on":
@@ -721,6 +781,13 @@ class MetadataEditor(MetadataWizard):
         if section_key == "Update":
             update = metadata_dict.get("update", {})
             return update.get(field_key.split(".", 1)[1])
+        if section_key == "Version":
+            version = metadata_dict.get("version", {})
+            subfield = field_key.split(".", 1)[1]
+            if subfield.startswith("latest."):
+                latest = version.get("latest", {})
+                return latest.get(subfield.split(".", 1)[1])
+            return version.get(subfield)
         if section_key == "Groups":
             return metadata_dict.get("groups")
         if section_key == "Depends on":
@@ -860,6 +927,37 @@ class MetadataEditor(MetadataWizard):
                 update["branch"] = self._ask_text(
                     "Git branch", str(update.get("branch", ""))
                 ) or None
+            return
+
+        if section_key == "Version":
+            version = metadata_dict.setdefault("version", {})
+            subfield = field_key.split(".", 1)[1]
+            if subfield == "current_command":
+                version["current_command"] = self._ask_text(
+                    "Current version command", str(version.get("current_command", ""))
+                ) or None
+            elif subfield == "regex":
+                version["regex"] = self._ask_text(
+                    "Version regex", str(version.get("regex", ""))
+                ) or None
+            elif subfield.startswith("latest."):
+                latest = version.setdefault("latest", {"strategy": "auto"})
+                key = subfield.split(".", 1)[1]
+                if key == "strategy":
+                    latest["strategy"] = self._ask_select(
+                        "Latest version strategy",
+                        ["auto", "docker", "git", "composer", "github", "command", "script", "package", "none"],
+                        str(latest.get("strategy", "auto")),
+                    )
+                elif key == "package_manager":
+                    latest["package_manager"] = self._ask_select(
+                        "Package manager", ["apt", "dnf", "pacman", "flatpak"],
+                        str(latest.get("package_manager", "apt")),
+                    )
+                else:
+                    latest[key] = self._ask_text(
+                        key.replace("_", " ").capitalize(), str(latest.get(key, ""))
+                    ) or None
             return
 
         if section_key == "Groups":

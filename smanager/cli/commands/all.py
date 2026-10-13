@@ -137,10 +137,11 @@ def all_disable(ctx: click.Context, yes: bool) -> None:
 
 @all_cmd.command(name="status")
 @click.option("--json", "as_json", is_flag=True, default=False, help="Output as JSON.")
+@click.option("--updates", "check_updates", is_flag=True, default=False, help="Check for available updates.")
 @click.pass_context
-def all_status(ctx: click.Context, as_json: bool) -> None:
+def all_status(ctx: click.Context, as_json: bool, check_updates: bool) -> None:
     """Show status for all managed services."""
-    emit_all_status(ctx, as_json)
+    emit_all_status(ctx, as_json, check_updates=check_updates)
 
 
 @all_cmd.command(name="info")

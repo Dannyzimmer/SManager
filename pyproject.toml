@@ -17,6 +17,7 @@ dependencies = [
     "click>=8.0",
     "rich>=13.0",
     "InquirerPy>=0.3.4",
+    "packaging>=21.0",
 ]
 
 [tool.setuptools.dynamic]

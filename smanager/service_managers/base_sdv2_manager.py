@@ -4,16 +4,29 @@ It extends the BaseManager with SDV2-specific logic, such as handling the SDConf
 file and integrating with VPN services.
 """
 
+import json
 import os
+import re
 import shlex
 import shutil
 import socket
 import subprocess
 import time
+import urllib.error
+import urllib.request
+
+try:
+    from packaging.version import InvalidVersion, Version
+except ImportError:  # pragma: no cover - packaging is a declared dependency
+    InvalidVersion = ValueError  # type: ignore[assignment,misc]
+    Version = None  # type: ignore[assignment]
 
 from . import BaseManager
-from ..datatypes import Service
+from ..datatypes import Service, UpdateInfo
 from ..vpn import VPNService
+
+GITHUB_API = "https://api.github.com/repos/{repo}/releases/latest"
+DEFAULT_CHECK_TIMEOUT = 5
 
 
 class BaseSDV2Manager(BaseManager):
@@ -529,6 +542,527 @@ class BaseSDV2Manager(BaseManager):
             ) from exc
         except FileNotFoundError as exc:
             raise RuntimeError(f"Command not found: {command[0]}") from exc
+
+    # ------------------------------------------------------------------
+    # Version checking
+    # ------------------------------------------------------------------
+    def check_update(self) -> UpdateInfo | None:
+        """Return update availability for this service.
+
+        Returns None when the service is not configured for version checking
+        (no ``version`` section and no ``scripts.check_update``). Errors are
+        captured in ``UpdateInfo.error`` so ``status`` never fails.
+        """
+        version = self.service.metadata.version
+        if version is None and self._script_value("check_update") is None:
+            return None
+
+        strategy: str | None = None
+        try:
+            strategy = self._resolve_version_strategy()
+            current, latest, override = self._evaluate_version_strategy(strategy)
+            available = override if override is not None else self._compare_versions(current, latest)
+            return UpdateInfo(
+                available=available,
+                current=current,
+                latest=latest,
+                source=strategy,
+            )
+        except Exception as exc:  # noqa: BLE001 - status must not fail
+            return UpdateInfo(source=strategy, error=str(exc))
+
+    @property
+    def _check_timeout(self) -> float:
+        try:
+            return float(os.environ.get("SMANAGER_CHECK_TIMEOUT", DEFAULT_CHECK_TIMEOUT))
+        except (TypeError, ValueError):
+            return float(DEFAULT_CHECK_TIMEOUT)
+
+    def _resolve_version_strategy(self) -> str:
+        if self._script_value("check_update") is not None:
+            return "script"
+
+        version = self.service.metadata.version
+        latest = version.latest if version else None
+        explicit = latest.strategy if latest else None
+        if explicit and explicit != "auto":
+            return explicit
+
+        if self.service.metadata.runtime.type == "docker":
+            return "docker"
+        if self._github_repo() is not None:
+            return "github"
+        detected = self._detect_update_strategy()
+        if detected:
+            return detected
+        raise RuntimeError(
+            "Could not auto-detect a version source. Set 'version.latest.strategy' "
+            "or provide 'scripts.check_update'."
+        )
+
+    def _evaluate_version_strategy(self, strategy: str) -> tuple[str | None, str | None, bool | None]:
+        version = self.service.metadata.version
+        latest = version.latest if version else None
+        regex = version.regex if version else None
+
+        if strategy == "docker":
+            return self._docker_version_info()
+        if strategy == "composer":
+            return self._composer_version_info()
+        if strategy == "git":
+            return self._git_version_info(latest)
+
+        current = self._current_version(strategy)
+
+        if strategy == "script":
+            latest_version = self._extract_version(self._run_script_output("check_update"), regex)
+        elif strategy == "command":
+            if not latest or not latest.command:
+                raise RuntimeError("version.latest.strategy 'command' requires 'command'.")
+            latest_version = self._extract_version(self._run_check_command(latest.command), regex)
+        elif strategy == "github":
+            repo = self._github_repo()
+            if not repo:
+                raise RuntimeError(
+                    "version.latest.strategy 'github' needs 'repo' or a github git remote."
+                )
+            latest_version = self._extract_version(self._fetch_github_latest(repo), regex)
+        elif strategy == "package":
+            if not latest:
+                raise RuntimeError("version.latest.strategy 'package' requires configuration.")
+            return self._package_version_info(latest)
+        else:
+            raise RuntimeError(f"Unsupported version strategy: {strategy}")
+
+        return current, latest_version, None
+
+    def _current_version(self, strategy: str) -> str | None:
+        version = self.service.metadata.version
+        if version and version.current_command:
+            text = self._run_check_command(version.current_command)
+            return self._extract_version(text, version.regex)
+
+        path = self._update_path()
+        if os.path.isdir(os.path.join(path, ".git")):
+            tag = self._git_output(path, ["describe", "--tags", "--abbrev=0"])
+            if tag:
+                return tag
+            return self._git_output(path, ["rev-parse", "--short", "HEAD"])
+        return None
+
+    @staticmethod
+    def _extract_version(text: str | None, regex: str | None) -> str | None:
+        if not text:
+            return None
+        cleaned = text.strip()
+        if not cleaned:
+            return None
+        if regex:
+            match = re.search(regex, cleaned, re.MULTILINE)
+            if not match:
+                return None
+            value = match.group(1) if match.groups() else match.group(0)
+            return value.strip()
+        match = re.search(r"v?\d+(?:\.\d+)+", cleaned)
+        if match:
+            return match.group(0)
+        return cleaned.splitlines()[0].strip()
+
+    @staticmethod
+    def _compare_versions(current: str | None, latest: str | None) -> bool | None:
+        if latest is None or current is None:
+            return None
+        current_text = str(current).strip()
+        latest_text = str(latest).strip()
+        if current_text == latest_text:
+            return False
+        # Git SHAs may differ in length (short vs full) for the same commit.
+        if re.fullmatch(r"[0-9a-f]{7,40}", current_text) and re.fullmatch(r"[0-9a-f]{7,40}", latest_text):
+            return not (current_text.startswith(latest_text) or latest_text.startswith(current_text))
+        if Version is None:
+            return True
+        try:
+            normalized_current = Version(str(current).strip().lstrip("vV"))
+            normalized_latest = Version(str(latest).strip().lstrip("vV"))
+            return normalized_latest > normalized_current
+        except InvalidVersion:
+            return True
+        except Exception:
+            return True
+
+    @staticmethod
+    def _highest_version(values: list[str]) -> str | None:
+        best: str | None = None
+        best_parsed = None
+        for value in values:
+            if Version is None:
+                return best or (values[0] if values else None)
+            try:
+                parsed = Version(str(value).strip().lstrip("vV"))
+            except InvalidVersion:
+                continue
+            if best_parsed is None or parsed > best_parsed:
+                best_parsed = parsed
+                best = value
+        return best or (values[0] if values else None)
+
+    # --- command/script helpers -------------------------------------
+    def _run_check_command(self, command: str) -> str:
+        argv = shlex.split(command)
+        if not argv:
+            raise RuntimeError("Empty version command.")
+        try:
+            result = subprocess.run(
+                argv,
+                capture_output=True,
+                text=True,
+                check=True,
+                cwd=self._update_path(),
+                timeout=self._check_timeout,
+            )
+        except subprocess.CalledProcessError as exc:
+            detail = (exc.stderr or exc.stdout or "").strip()
+            raise RuntimeError(
+                f"Version command failed ({command}): {detail or f'exit code {exc.returncode}'}"
+            ) from exc
+        except FileNotFoundError as exc:
+            raise RuntimeError(f"Command not found: {argv[0]}") from exc
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(f"Version command timed out: {command}") from exc
+        return result.stdout.strip()
+
+    def _run_script_output(self, action: str) -> str:
+        argv = self._script_argv(action)
+        if argv is None:
+            raise RuntimeError(f"No '{action}' script configured.")
+        scripts = self.service.metadata.scripts
+        run_env = os.environ.copy()
+        if scripts is not None and scripts.env:
+            run_env.update({str(key): str(val) for key, val in scripts.env.items()})
+        cwd = self.service.service_abspath
+        if scripts is not None and scripts.working_dir:
+            candidate = os.path.expanduser(scripts.working_dir)
+            if not os.path.isabs(candidate):
+                candidate = os.path.join(self.service.service_abspath, candidate)
+            cwd = candidate
+        try:
+            result = subprocess.run(
+                argv,
+                capture_output=True,
+                text=True,
+                check=True,
+                cwd=cwd,
+                env=run_env,
+                timeout=self._check_timeout,
+            )
+        except subprocess.CalledProcessError as exc:
+            detail = (exc.stderr or exc.stdout or "").strip()
+            raise RuntimeError(
+                f"Script '{action}' failed: {detail or f'exit code {exc.returncode}'}"
+            ) from exc
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(f"Script '{action}' timed out.") from exc
+        return result.stdout.strip()
+
+    def _cmd_stdout(self, args: list[str], timeout: float | None = None) -> str | None:
+        try:
+            result = subprocess.run(
+                args,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=timeout or self._check_timeout,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            return None
+        if result.returncode != 0:
+            return None
+        return result.stdout.strip()
+
+    # --- git helpers ------------------------------------------------
+    def _git_output(self, path: str, args: list[str]) -> str | None:
+        try:
+            result = subprocess.run(
+                ["git", "-C", path, *args],
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=self._check_timeout,
+            )
+        except (subprocess.SubprocessError, OSError):
+            return None
+        return result.stdout.strip() or None
+
+    def _git_remote_tags(self, path: str) -> list[str]:
+        try:
+            result = subprocess.run(
+                ["git", "-C", path, "ls-remote", "--tags", "--refs", "origin"],
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=self._check_timeout,
+            )
+        except (subprocess.SubprocessError, OSError):
+            return []
+        tags: list[str] = []
+        for line in result.stdout.splitlines():
+            parts = line.split()
+            if len(parts) == 2 and parts[1].startswith("refs/tags/"):
+                tags.append(parts[1][len("refs/tags/"):])
+        return tags
+
+    def _git_fetch(self, path: str, branch: str | None) -> None:
+        command = ["git", "-C", path, "fetch", "--quiet", "origin"]
+        if branch:
+            command.append(branch)
+        try:
+            subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=max(self._check_timeout, 15),
+            )
+        except (subprocess.SubprocessError, OSError):
+            pass
+
+    def _git_count(self, path: str, revision_range: str) -> int | None:
+        output = self._git_output(path, ["rev-list", "--count", revision_range])
+        if not output:
+            return None
+        try:
+            return int(output)
+        except ValueError:
+            return None
+
+    def _git_version_info(self, latest) -> tuple[str | None, str | None, bool | None]:
+        path = self._update_path()
+        if not os.path.isdir(os.path.join(path, ".git")):
+            raise RuntimeError(
+                f"version strategy 'git' but '{path}' is not a git repository."
+            )
+
+        local_tag = self._git_output(path, ["describe", "--tags", "--abbrev=0"])
+        remote_tags = self._git_remote_tags(path)
+        if local_tag and remote_tags:
+            return local_tag, self._highest_version(remote_tags), None
+
+        branch = latest.branch if latest and latest.branch else None
+        if not branch:
+            upstream = self._git_output(
+                path, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]
+            )
+            if upstream and "/" in upstream:
+                branch = upstream.split("/", 1)[1]
+        if not branch:
+            branch = self._git_output(path, ["rev-parse", "--abbrev-ref", "HEAD"])
+
+        self._git_fetch(path, branch)
+        local_sha = self._git_output(path, ["rev-parse", "HEAD"])
+        remote_sha = self._git_output(path, ["rev-parse", "FETCH_HEAD"])
+        if not local_sha or not remote_sha:
+            return (local_sha[:12] if local_sha else None, remote_sha[:12] if remote_sha else None, None)
+        if local_sha == remote_sha:
+            return local_sha[:12], remote_sha[:12], False
+
+        remote_ahead = self._git_count(path, "HEAD..FETCH_HEAD")
+        local_ahead = self._git_count(path, "FETCH_HEAD..HEAD")
+        override: bool | None = None
+        if remote_ahead is not None and local_ahead is not None:
+            override = remote_ahead > 0
+        return local_sha[:12], remote_sha[:12], override
+
+    @staticmethod
+    def _parse_github_repo(url: str) -> str | None:
+        if not url:
+            return None
+        match = re.search(r"github\.com[:/]+([^/]+)/([^/]+?)(?:\.git)?/?$", url.strip())
+        if not match:
+            return None
+        return f"{match.group(1)}/{match.group(2)}"
+
+    def _github_repo(self) -> str | None:
+        version = self.service.metadata.version
+        latest = version.latest if version else None
+        if latest and latest.repo:
+            return str(latest.repo).strip()
+        path = self._update_path()
+        if not os.path.isdir(os.path.join(path, ".git")):
+            return None
+        url = self._git_output(path, ["remote", "get-url", "origin"])
+        return self._parse_github_repo(url or "")
+
+    def _fetch_github_latest(self, repo: str) -> str:
+        request = urllib.request.Request(
+            GITHUB_API.format(repo=repo),
+            headers={"Accept": "application/vnd.github+json", "User-Agent": "smanager"},
+        )
+        token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+        if token:
+            request.add_header("Authorization", f"Bearer {token}")
+        try:
+            with urllib.request.urlopen(request, timeout=self._check_timeout) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            raise RuntimeError(f"GitHub API error for '{repo}': HTTP {exc.code}") from exc
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+            raise RuntimeError(f"GitHub API request failed for '{repo}': {exc}") from exc
+        tag = payload.get("tag_name") or payload.get("name")
+        if not tag:
+            raise RuntimeError(f"GitHub API returned no tag for '{repo}'.")
+        return str(tag)
+
+    # --- composer ---------------------------------------------------
+    def _composer_version_info(self) -> tuple[str | None, str | None, bool | None]:
+        path = self._update_path()
+        if not os.path.isfile(os.path.join(path, "composer.json")):
+            raise RuntimeError(
+                f"version strategy 'composer' but no composer.json found in '{path}'."
+            )
+        command = [
+            "composer", "--working-dir", path, "outdated",
+            "--direct", "--format=json", "--no-interaction",
+        ]
+        try:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=max(self._check_timeout, 30),
+            )
+        except FileNotFoundError as exc:
+            raise RuntimeError("composer executable not found.") from exc
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError("composer outdated timed out.") from exc
+
+        try:
+            payload = json.loads(result.stdout or "{}")
+        except json.JSONDecodeError as exc:
+            detail = (result.stderr or result.stdout or "").strip()
+            raise RuntimeError(f"Could not parse composer outdated output: {detail}") from exc
+
+        outdated: list[str] = []
+        for package in payload.get("installed") or []:
+            name = package.get("name")
+            current = package.get("version")
+            latest = package.get("latest")
+            status = package.get("latest-status")
+            if latest and status not in (None, "up-to-date") and str(current) != str(latest):
+                outdated.append(f"{name} {current}->{latest}")
+        if outdated:
+            return "; ".join(outdated), "updates available", True
+        return "up-to-date", "up-to-date", False
+
+    # --- docker -----------------------------------------------------
+    def _docker_version_info(self) -> tuple[str | None, str | None, bool | None]:
+        docker = self.service.metadata.docker
+        if self.service.metadata.runtime.type != "docker" or not docker or not docker.compose_file:
+            raise RuntimeError("version strategy 'docker' requires docker.compose_file.")
+        compose_path = os.path.join(self.service.service_abspath, docker.compose_file)
+        images = self._docker_compose_images(compose_path)
+        if not images:
+            raise RuntimeError("Could not determine images from the compose file.")
+
+        outdated: list[str] = []
+        local_summaries: list[str] = []
+        remote_summaries: list[str] = []
+        missing_local = False
+        for image in images:
+            local = self._docker_local_digest(image)
+            remote = self._docker_remote_digest(image)
+            if local:
+                local_summaries.append(local)
+            elif remote:
+                missing_local = True
+            if remote:
+                remote_summaries.append(remote)
+            if local and remote and local != remote:
+                outdated.append(image)
+
+        current = ", ".join(local_summaries) or None
+        latest = ", ".join(remote_summaries) or None
+        if not remote_summaries or missing_local:
+            return current, latest, None
+        return current, latest, bool(outdated)
+
+    def _docker_compose_images(self, compose_path: str) -> list[str]:
+        output = self._cmd_stdout(
+            ["docker", "compose", "-f", compose_path, "config", "--images"],
+            timeout=max(self._check_timeout, 15),
+        )
+        if not output:
+            return []
+        return [line.strip() for line in output.splitlines() if line.strip()]
+
+    def _docker_local_digest(self, image: str) -> str | None:
+        output = self._cmd_stdout(
+            ["docker", "image", "inspect", image, "--format", "{{json .RepoDigests}}"],
+            timeout=max(self._check_timeout, 15),
+        )
+        if not output:
+            return None
+        try:
+            digests = json.loads(output)
+        except json.JSONDecodeError:
+            return None
+        if not digests:
+            return None
+        return str(digests[0]).split("@")[-1]
+
+    def _docker_remote_digest(self, image: str) -> str | None:
+        if shutil.which("docker"):
+            output = self._cmd_stdout(
+                ["docker", "buildx", "imagetools", "inspect", image, "--format", "{{.Manifest.Digest}}"],
+                timeout=max(self._check_timeout, 20),
+            )
+            if output:
+                return output
+        if shutil.which("regctl"):
+            output = self._cmd_stdout(["regctl", "image", "digest", image], timeout=max(self._check_timeout, 20))
+            if output:
+                return output
+        if shutil.which("crane"):
+            output = self._cmd_stdout(["crane", "digest", image], timeout=max(self._check_timeout, 20))
+            if output:
+                return output
+        return None
+
+    # --- package managers -------------------------------------------
+    def _package_version_info(self, latest) -> tuple[str | None, str | None, bool | None]:
+        manager = latest.package_manager
+        package = latest.package
+        if manager == "apt":
+            output = self._cmd_stdout(["apt-cache", "policy", package])
+            if output is None:
+                raise RuntimeError("apt-cache not available.")
+            current = re.search(r"Installed:\s*(\S+)", output)
+            candidate = re.search(r"Candidate:\s*(\S+)", output)
+            current_v = current.group(1) if current else None
+            latest_v = candidate.group(1) if candidate else None
+            return current_v, latest_v, None
+        if manager == "pacman":
+            current_v = self._cmd_stdout(["pacman", "-Q", package])
+            current_v = current_v.split()[-1] if current_v else None
+            upgradable = self._cmd_stdout(["pacman", "-Qu", package])
+            latest_v = upgradable.split()[-1] if upgradable else current_v
+            return current_v, latest_v, None
+        if manager == "dnf":
+            upgradable = self._cmd_stdout(["dnf", "-q", "check-update", package])
+            current_v = self._cmd_stdout(["rpm", "-q", "--qf", "%{VERSION}", package])
+            if upgradable:
+                parts = upgradable.split()
+                latest_v = parts[1] if len(parts) > 1 else None
+                return current_v, latest_v, True
+            return current_v, current_v, False
+        if manager == "flatpak":
+            info = self._cmd_stdout(["flatpak", "remote-info", "flathub", package])
+            if info is None:
+                raise RuntimeError("flatpak remote-info failed.")
+            latest_match = re.search(r"^\s*Version:\s*(.+)$", info, re.MULTILINE)
+            latest_v = latest_match.group(1).strip() if latest_match else None
+            return None, latest_v, None
+        raise RuntimeError(f"Unsupported package manager: {manager}")
 
     # ------------------------------------------------------------------
     # VPN / HTTPS helpers

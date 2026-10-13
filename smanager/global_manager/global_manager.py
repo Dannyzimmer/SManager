@@ -11,6 +11,7 @@ class GlobalManager(BaseGlobalManager):
 
     def __init__(self, services_root: str, global_config: GlobalConfig, vpn: VPNService):
         super().__init__(services_root, global_config, vpn)
+        self._update_check_cache: dict[str, object] = {}
 
     def _find_service_by_id(self, service_id: str) -> Service:
         """Helper method to find a service by its unique identifier."""
@@ -170,28 +171,39 @@ class GlobalManager(BaseGlobalManager):
             payload={"service_count": len(self.services), "dry_run": dry_run},
         )
         
-    def get_status(self, service_id: str) -> ServiceStatus:
+    def _check_update_cached(self, service: Service, manager: BaseManager):
+        service_id = service.metadata.id
+        if service_id not in self._update_check_cache:
+            self._update_check_cache[service_id] = manager.check_update()
+        return self._update_check_cache[service_id]
+
+    def get_status(self, service_id: str, check_updates: bool = False) -> ServiceStatus:
         """Get the status of a specific service by its ID."""
         service = self._find_service_by_id(service_id)
         manager = self.get_service_manager(service)
         result = manager.status()
         result.enabled = bool(service.metadata.active)
+        if check_updates:
+            result.update = self._check_update_cached(service, manager)
         return result
     
-    def get_group_status(self, group_name: str) -> MultiStatus:
+    def get_group_status(self, group_name: str, check_updates: bool = False) -> MultiStatus:
         """Get the status of all services in a group."""
         services = self.get_group(group_name)
-        statuses = [self.get_status(service.metadata.id) for service in services]
+        statuses = [self.get_status(service.metadata.id, check_updates=check_updates) for service in services]
         return MultiStatus(services=statuses)
     
-    def get_dependency_status(self, dependency_name: str) -> MultiStatus:
+    def get_dependency_status(self, dependency_name: str, check_updates: bool = False) -> MultiStatus:
         """Get the status of all services that depend on a specific dependency."""
         services = self.get_services_by_dependency(dependency_name)
-        statuses = [self.get_status(service.metadata.id) for service in services]
+        statuses = [self.get_status(service.metadata.id, check_updates=check_updates) for service in services]
         return MultiStatus(services=statuses)
     
-    def get_all_status(self) -> MultiStatus:
+    def get_all_status(self, check_updates: bool = False) -> MultiStatus:
         """Get the status of all services."""
-        statuses = [self.get_status(service.metadata.id) for service in self.services]
+        statuses = [
+            self.get_status(service.metadata.id, check_updates=check_updates)
+            for service in self.services
+        ]
         return MultiStatus(services=statuses)
     

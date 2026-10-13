@@ -117,6 +117,10 @@ class BaseManager:
         """Update the service to the latest available version."""
         raise NotImplementedError("Update method must be implemented by subclasses.")
 
+    def check_update(self):
+        """Return update-availability info for the service, or None if unsupported."""
+        return None
+
     @abstractmethod
     def status(self)-> ServiceStatus:
         """Check the status of the service."""

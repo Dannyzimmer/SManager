@@ -14,37 +14,52 @@ def _emit_status(result: object, as_json: bool) -> None:
         render_status_table(result)
 
 
-def emit_service_status(ctx: click.Context, service_id: str, as_json: bool) -> None:
+def emit_service_status(
+    ctx: click.Context,
+    service_id: str,
+    as_json: bool,
+    check_updates: bool = False,
+) -> None:
     manager = get_manager(ctx)
     try:
-        result = manager.get_status(service_id)
+        result = manager.get_status(service_id, check_updates=check_updates)
         _emit_status(result, as_json)
     except Exception as e:
         raise click.ClickException(str(e))
 
 
-def emit_group_status(ctx: click.Context, group_name: str, as_json: bool) -> None:
+def emit_group_status(
+    ctx: click.Context,
+    group_name: str,
+    as_json: bool,
+    check_updates: bool = False,
+) -> None:
     manager = get_manager(ctx)
     try:
-        result = manager.get_group_status(group_name)
+        result = manager.get_group_status(group_name, check_updates=check_updates)
         _emit_status(result, as_json)
     except Exception as e:
         raise click.ClickException(str(e))
 
 
-def emit_dependency_status(ctx: click.Context, dependency_name: str, as_json: bool) -> None:
+def emit_dependency_status(
+    ctx: click.Context,
+    dependency_name: str,
+    as_json: bool,
+    check_updates: bool = False,
+) -> None:
     manager = get_manager(ctx)
     try:
-        result = manager.get_dependency_status(dependency_name)
+        result = manager.get_dependency_status(dependency_name, check_updates=check_updates)
         _emit_status(result, as_json)
     except Exception as e:
         raise click.ClickException(str(e))
 
 
-def emit_all_status(ctx: click.Context, as_json: bool) -> None:
+def emit_all_status(ctx: click.Context, as_json: bool, check_updates: bool = False) -> None:
     manager = get_manager(ctx)
     try:
-        result = manager.get_all_status()
+        result = manager.get_all_status(check_updates=check_updates)
         _emit_status(result, as_json)
     except Exception as e:
         raise click.ClickException(str(e))

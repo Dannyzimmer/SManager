@@ -84,10 +84,16 @@ def dependency_disable(ctx: click.Context, dependency_name: str) -> None:
 @dependency_cmd.command(name="status")
 @click.argument("dependency_name")
 @click.option("--json", "as_json", is_flag=True, default=False, help="Output as JSON.")
+@click.option("--updates", "check_updates", is_flag=True, default=False, help="Check for available updates.")
 @click.pass_context
-def dependency_status(ctx: click.Context, dependency_name: str, as_json: bool) -> None:
+def dependency_status(
+    ctx: click.Context,
+    dependency_name: str,
+    as_json: bool,
+    check_updates: bool,
+) -> None:
     """Show status for services by dependency."""
-    emit_dependency_status(ctx, dependency_name, as_json)
+    emit_dependency_status(ctx, dependency_name, as_json, check_updates=check_updates)
 
 
 @dependency_cmd.command(name="info")

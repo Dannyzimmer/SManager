@@ -84,10 +84,11 @@ def service_disable(ctx: click.Context, service_id: str) -> None:
 @service_cmd.command(name="status")
 @click.argument("service_id")
 @click.option("--json", "as_json", is_flag=True, default=False, help="Output as JSON.")
+@click.option("--updates", "check_updates", is_flag=True, default=False, help="Check for available updates.")
 @click.pass_context
-def service_status(ctx: click.Context, service_id: str, as_json: bool) -> None:
+def service_status(ctx: click.Context, service_id: str, as_json: bool, check_updates: bool) -> None:
     """Show status for a single service."""
-    emit_service_status(ctx, service_id, as_json)
+    emit_service_status(ctx, service_id, as_json, check_updates=check_updates)
 
 
 @service_cmd.command(name="info")

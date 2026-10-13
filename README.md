@@ -15,6 +15,7 @@ smanager group restart music
 - Unified service management for local/systemd, Docker, and PHP runtimes.
 - Per-service custom start/stop/restart/status/update scripts.
 - One-command updates (Docker Compose out of the box, opt-in git/composer heuristics).
+- Update-availability detection in `status` (Docker digests, git, GitHub releases, composer, scripts).
 - VPN integration (Tailscale provider support).
 - Interactive metadata creation and editing.
 - YAML-based global configuration.
@@ -219,6 +220,49 @@ services without `scripts.update` or an `update` section error out clearly.
 
 Inactive services (`active: false`) are skipped by `update`, just like `start`.
 
+## Checking for updates
+`status` can report whether a newer version is available. The check is opt-in
+per service (a `version` section or `scripts.check_update`) and only runs when
+`--updates` is passed:
+
+```bash
+smanager service status sonarr --updates
+smanager all status --updates --json
+```
+
+The JSON status gains a nested `update` object:
+
+```json
+"update": { "available": true, "current": "1.2.0", "latest": "1.3.1", "source": "github", "error": null }
+```
+
+How the current/latest versions are obtained, by `version.latest.strategy`:
+
+- `script` — `scripts.check_update` prints the latest version on stdout (`exit 0`).
+- `command` — an inline command prints the latest version; `version.regex` extracts it.
+- `github` — GitHub Releases API (`repo: owner/name`, or derived from a github git remote); `GITHUB_TOKEN`/`GH_TOKEN` raises the rate limit.
+- `git` — compares the local checkout with the remote branch (`git fetch` + ancestry).
+- `composer` — `composer outdated --direct --format=json`.
+- `docker` — compares local image digests with the registry (`docker buildx imagetools` / `regctl` / `crane`).
+- `package` — `apt`/`dnf`/`pacman`/`flatpak` using `package_manager` + `package`.
+- `auto` — Docker uses the docker strategy; local/PHP detect a git remote (github → API) or a git/composer project.
+
+```json
+{
+  "version": {
+    "current_command": "sonarr --version",
+    "regex": "v?([0-9]+\\.[0-9]+\\.[0-9]+)",
+    "latest": { "strategy": "auto" }
+  }
+}
+```
+
+Current version resolution order: `version.current_command`, otherwise a git tag
+(`git describe --tags`) / short SHA when the service is a git repo. If the current
+version cannot be determined, `available` is `null` (unknown) instead of guessing.
+Network/rate-limit/parse failures are reported in `update.error` and never break
+`status`. The timeout can be tuned with `SMANAGER_CHECK_TIMEOUT` (seconds).
+
 ## HTTPS over VPN without passwords
 By default SManager runs the privileged Tailscale operations **non-interactively**
 and never blocks waiting for a password:
@@ -248,6 +292,6 @@ serve never leaves the service itself down.
 ## Notes
 - `metadata init` creates a new file.
 - `metadata edit` modifies an existing file.
-- `metadata validate` checks script paths and runtime-specific rules.
+- `metadata validate` checks script paths and runtime/version-specific rules.
 - Use command-specific `--help` for the latest options and examples.
 

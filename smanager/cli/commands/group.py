@@ -84,10 +84,11 @@ def group_disable(ctx: click.Context, group_name: str) -> None:
 @group_cmd.command(name="status")
 @click.argument("group_name")
 @click.option("--json", "as_json", is_flag=True, default=False, help="Output as JSON.")
+@click.option("--updates", "check_updates", is_flag=True, default=False, help="Check for available updates.")
 @click.pass_context
-def group_status(ctx: click.Context, group_name: str, as_json: bool) -> None:
+def group_status(ctx: click.Context, group_name: str, as_json: bool, check_updates: bool) -> None:
     """Show status for all services in GROUP_NAME."""
-    emit_group_status(ctx, group_name, as_json)
+    emit_group_status(ctx, group_name, as_json, check_updates=check_updates)
 
 
 @group_cmd.command(name="info")
