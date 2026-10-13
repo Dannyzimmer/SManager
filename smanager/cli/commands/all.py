@@ -12,21 +12,26 @@ def all_cmd(ctx: click.Context) -> None:
     """Manage all services.
 
     \b
-    Actions: start, stop, restart, enable, disable, status, info
+    Actions: start, stop, restart, update, enable, disable, status, info
 
     Management actions require --yes to prevent accidental execution.
     """
 
 
-def _run_all_action(ctx: click.Context, action: str, yes: bool) -> None:
-    if not yes:
+def _run_all_action(
+    ctx: click.Context,
+    action: str,
+    yes: bool,
+    dry_run: bool = False,
+) -> None:
+    if not yes and not dry_run:
         raise click.UsageError(
             f"This will run '{action}' on ALL services. Pass --yes to confirm."
         )
     manager = get_manager(ctx)
     detach_renderer = attach_cli_event_renderer(manager, command_scope="all")
     try:
-        manager.manage_all(action)
+        manager.manage_all(action, dry_run=dry_run)
     except Exception as e:
         raise click.ClickException(str(e))
     finally:
@@ -79,6 +84,23 @@ def all_restart(ctx: click.Context, yes: bool) -> None:
     Requires --yes to prevent accidental execution.
     """
     _run_all_action(ctx, "restart", yes)
+
+
+@all_cmd.command(name="update")
+@click.option(
+    "--yes",
+    is_flag=True,
+    default=False,
+    help="Confirm the operation on all services.",
+)
+@click.option("--dry-run", is_flag=True, default=False, help="Show what would run without executing it.")
+@click.pass_context
+def all_update(ctx: click.Context, yes: bool, dry_run: bool) -> None:
+    """Update all managed services.
+
+    Requires --yes unless --dry-run is used.
+    """
+    _run_all_action(ctx, "update", yes, dry_run=dry_run)
 
 
 @all_cmd.command(name="enable")

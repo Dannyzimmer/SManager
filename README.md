@@ -13,7 +13,8 @@ smanager group restart music
 
 ## Features
 - Unified service management for local/systemd, Docker, and PHP runtimes.
-- Per-service custom start/stop/restart/status scripts.
+- Per-service custom start/stop/restart/status/update scripts.
+- One-command updates (Docker Compose out of the box, opt-in git/composer heuristics).
 - VPN integration (Tailscale provider support).
 - Interactive metadata creation and editing.
 - YAML-based global configuration.
@@ -150,9 +151,9 @@ For `runtime.type: php`, define the `php` section with:
 - `env` (optional map of environment variables)
 
 ## Custom Scripts
-Any service can override `start`, `stop`, `restart`, and/or `status` with a shell
-script. Provide any subset of them; the operations you do not override keep using
-the default mechanism for the runtime type.
+Any service can override `start`, `stop`, `restart`, `status`, and/or `update`
+with a shell script. Provide any subset of them; the operations you do not
+override keep using the default mechanism for the runtime type.
 
 ```json
 {
@@ -161,6 +162,7 @@ the default mechanism for the runtime type.
     "stop": "scripts/stop.sh",
     "restart": "scripts/restart.sh",
     "status": "scripts/status.sh",
+    "update": "scripts/update.sh",
     "working_dir": ".",
     "env": { "APP_ENV": "production" }
   }
@@ -175,6 +177,47 @@ the default mechanism for the runtime type.
   the VPN HTTPS serve afterwards when `vpn.serve_https` is enabled.
 - When `scripts.start` and `scripts.stop` are both present, `local.systemd_services`
   and `docker.compose_file` become optional.
+
+## Updating services
+Update a single service, a group, a dependency, or everything:
+
+```bash
+smanager service update sonarr
+smanager group update media
+smanager dependency update qbittorrent
+smanager all update --yes
+```
+
+Add `--dry-run` to print exactly what would run without executing anything
+(`smanager all update --dry-run` does not require `--yes`).
+
+Resolution order for `update`:
+
+1. **`scripts.update`** if defined — the script owns the whole update/restart.
+2. Otherwise, the **`update`** metadata section:
+   - `docker` (default for Docker services): `docker compose pull --ignore-pull-failures`
+     followed by `docker compose up -d --build`.
+   - `git`: `git -C <path> pull [origin <branch>]`, then an automatic restart.
+   - `composer`: `composer --working-dir <path> update --no-interaction`, then a restart.
+   - `command`: an inline command (`shlex`-split), which owns the update.
+   - `none`: disables updates explicitly.
+
+```json
+{
+  "update": {
+    "strategy": "auto",
+    "path": "/opt/sonarr",
+    "branch": "main",
+    "command": "composer update --no-interaction"
+  }
+}
+```
+
+With `strategy: "auto"` (opt-in), local/PHP services are inspected for a `.git`
+directory or a `composer.json`, and the matching strategy is used. Local and PHP
+services without `scripts.update` or an `update` section error out clearly.
+
+Inactive services (`active: false`) are skipped by `update`, just like `start`.
 
 ## HTTPS over VPN without passwords
 By default SManager runs the privileged Tailscale operations **non-interactively**

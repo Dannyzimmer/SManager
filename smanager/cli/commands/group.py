@@ -12,15 +12,20 @@ def group_cmd(ctx: click.Context) -> None:
     """Manage all services in a group.
 
     \b
-    Actions: start, stop, restart, enable, disable, status, info
+    Actions: start, stop, restart, update, enable, disable, status, info
     """
 
 
-def _run_group_action(ctx: click.Context, action: str, group_name: str) -> None:
+def _run_group_action(
+    ctx: click.Context,
+    action: str,
+    group_name: str,
+    dry_run: bool = False,
+) -> None:
     manager = get_manager(ctx)
     detach_renderer = attach_cli_event_renderer(manager, command_scope="group")
     try:
-        manager.manage_group(group_name, action)
+        manager.manage_group(group_name, action, dry_run=dry_run)
     except Exception as e:
         raise click.ClickException(str(e))
     finally:
@@ -49,6 +54,15 @@ def group_stop(ctx: click.Context, group_name: str) -> None:
 def group_restart(ctx: click.Context, group_name: str) -> None:
     """Restart all services in GROUP_NAME."""
     _run_group_action(ctx, "restart", group_name)
+
+
+@group_cmd.command(name="update")
+@click.argument("group_name")
+@click.option("--dry-run", is_flag=True, default=False, help="Show what would run without executing it.")
+@click.pass_context
+def group_update(ctx: click.Context, group_name: str, dry_run: bool) -> None:
+    """Update all services in GROUP_NAME."""
+    _run_group_action(ctx, "update", group_name, dry_run=dry_run)
 
 
 @group_cmd.command(name="enable")

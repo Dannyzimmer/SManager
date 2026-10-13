@@ -90,7 +90,7 @@ def _validate_scripts_rules(metadata: ServiceMetadata, metadata_path: Path) -> l
     if scripts is None:
         return errors
 
-    for action in ("start", "stop", "restart", "status"):
+    for action in ("start", "stop", "restart", "status", "update"):
         value = getattr(scripts, action, None)
         if value is None or not str(value).strip():
             continue
@@ -108,6 +108,32 @@ def _validate_scripts_rules(metadata: ServiceMetadata, metadata_path: Path) -> l
             errors.append(
                 f"scripts.working_dir does not exist or is not a directory: {working_dir}"
             )
+
+    return errors
+
+
+def _validate_update_rules(metadata: ServiceMetadata, metadata_path: Path) -> list[str]:
+    errors: list[str] = []
+    update = metadata.update
+    if update is None:
+        return errors
+
+    if update.strategy == "command" and not str(update.command or "").strip():
+        errors.append("update.command must be a non-empty string when strategy is 'command'.")
+
+    if update.args is not None and not isinstance(update.args, list):
+        errors.append("update.args must be a list when provided.")
+
+    if update.path:
+        update_path = Path(str(update.path)).expanduser()
+        if not update_path.is_absolute():
+            update_path = metadata_path.parent / update_path
+        if not update_path.is_dir():
+            errors.append(f"update.path does not exist or is not a directory: {update_path}")
+        elif update.strategy == "git" and not (update_path / ".git").is_dir():
+            errors.append(f"update.strategy 'git' but no git repository at: {update_path}")
+        elif update.strategy == "composer" and not (update_path / "composer.json").is_file():
+            errors.append(f"update.strategy 'composer' but no composer.json at: {update_path}")
 
     return errors
 
@@ -147,6 +173,7 @@ def _validate_metadata_file(path: Path) -> dict:
 
     if metadata:
         errors.extend(_validate_scripts_rules(metadata, path))
+        errors.extend(_validate_update_rules(metadata, path))
 
     return {
         "path": str(path),

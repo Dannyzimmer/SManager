@@ -12,15 +12,20 @@ def dependency_cmd(ctx: click.Context) -> None:
     """Manage services by dependency.
 
     \b
-    Actions: start, stop, restart, enable, disable, status, info
+    Actions: start, stop, restart, update, enable, disable, status, info
     """
 
 
-def _run_dependency_action(ctx: click.Context, action: str, dependency_name: str) -> None:
+def _run_dependency_action(
+    ctx: click.Context,
+    action: str,
+    dependency_name: str,
+    dry_run: bool = False,
+) -> None:
     manager = get_manager(ctx)
     detach_renderer = attach_cli_event_renderer(manager, command_scope="dependency")
     try:
-        manager.manage_by_dependency(dependency_name, action)
+        manager.manage_by_dependency(dependency_name, action, dry_run=dry_run)
     except Exception as e:
         raise click.ClickException(str(e))
     finally:
@@ -49,6 +54,15 @@ def dependency_stop(ctx: click.Context, dependency_name: str) -> None:
 def dependency_restart(ctx: click.Context, dependency_name: str) -> None:
     """Restart services that depend on DEPENDENCY_NAME."""
     _run_dependency_action(ctx, "restart", dependency_name)
+
+
+@dependency_cmd.command(name="update")
+@click.argument("dependency_name")
+@click.option("--dry-run", is_flag=True, default=False, help="Show what would run without executing it.")
+@click.pass_context
+def dependency_update(ctx: click.Context, dependency_name: str, dry_run: bool) -> None:
+    """Update services that depend on DEPENDENCY_NAME."""
+    _run_dependency_action(ctx, "update", dependency_name, dry_run=dry_run)
 
 
 @dependency_cmd.command(name="enable")

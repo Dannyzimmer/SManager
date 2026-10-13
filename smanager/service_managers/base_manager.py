@@ -113,6 +113,10 @@ class BaseManager:
             service_id=self.get_id(),
         )
 
+    def update(self, dry_run: bool = False):
+        """Update the service to the latest available version."""
+        raise NotImplementedError("Update method must be implemented by subclasses.")
+
     @abstractmethod
     def status(self)-> ServiceStatus:
         """Check the status of the service."""

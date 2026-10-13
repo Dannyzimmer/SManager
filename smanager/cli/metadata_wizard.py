@@ -222,6 +222,8 @@ class MetadataWizard:
         if self._ask_confirm("Use custom scripts for start/stop/restart", False):
             scripts_section = self._ask_scripts()
 
+        update_section = self._ask_update_section()
+
         available_groups = self._existing_groups(service_dir)
         available_dependencies = self._existing_dependencies(service_dir, service_id)
         groups = self._ask_groups(available_groups)
@@ -259,6 +261,8 @@ class MetadataWizard:
             metadata_dict["php"] = php_section
         if scripts_section is not None:
             metadata_dict["scripts"] = scripts_section
+        if update_section is not None:
+            metadata_dict["update"] = update_section
 
         metadata = ServiceMetadata.from_dict(metadata_dict)
         self._render_review(metadata, service_dir, metadata_filename)
@@ -314,7 +318,7 @@ class MetadataWizard:
 
     def _ask_scripts(self) -> dict[str, Any] | None:
         section: dict[str, Any] = {}
-        for action in ("start", "stop", "restart", "status"):
+        for action in ("start", "stop", "restart", "status", "update"):
             value = self._ask_text(f"{action.capitalize()} script (.sh path, optional)", "").strip()
             if value:
                 section[action] = value
@@ -322,6 +326,28 @@ class MetadataWizard:
         if working_dir:
             section["working_dir"] = working_dir
         return section or None
+
+    def _ask_update_section(self) -> dict[str, Any] | None:
+        strategy = self._ask_select(
+            "Update strategy",
+            ["default", "auto", "docker", "git", "composer", "command", "none"],
+            "default",
+        )
+        if strategy == "default":
+            return None
+
+        section: dict[str, Any] = {"strategy": strategy}
+        if strategy == "command":
+            section["command"] = self._ask_text("Update command", "").strip()
+        if strategy in {"auto", "git", "composer"}:
+            path = self._ask_text("Update path (optional)", "").strip()
+            if path:
+                section["path"] = path
+        if strategy == "git":
+            branch = self._ask_text("Git branch (optional)", "").strip()
+            if branch:
+                section["branch"] = branch
+        return section
 
     def _ask_select(
         self,
@@ -472,7 +498,14 @@ class MetadataWizard:
             table.add_row("Script stop", metadata.scripts.stop or "-")
             table.add_row("Script restart", metadata.scripts.restart or "-")
             table.add_row("Script status", metadata.scripts.status or "-")
+            table.add_row("Script update", metadata.scripts.update or "-")
             table.add_row("Script working dir", metadata.scripts.working_dir or "-")
+
+        if metadata.update is not None:
+            table.add_row("Update strategy", metadata.update.strategy)
+            table.add_row("Update command", metadata.update.command or "-")
+            table.add_row("Update path", metadata.update.path or "-")
+            table.add_row("Update branch", metadata.update.branch or "-")
 
         table.add_row("Active", "yes" if metadata.active else "no")
         self.console.print(table)
@@ -567,6 +600,7 @@ class MetadataEditor(MetadataWizard):
             "Runtime",
             "Runtime details",
             "Scripts",
+            "Update",
             "Groups",
             "Depends on",
             vpn_label,
@@ -635,6 +669,13 @@ class MetadataEditor(MetadataWizard):
                 "scripts.status",
                 "scripts.working_dir",
             ]
+        elif section_key == "Update":
+            field_keys = [
+                "update.strategy",
+                "update.command",
+                "update.path",
+                "update.branch",
+            ]
         elif section_key == "Groups":
             field_keys = ["groups"]
         elif section_key == "Depends on":
@@ -677,6 +718,9 @@ class MetadataEditor(MetadataWizard):
         if section_key == "Scripts":
             scripts = metadata_dict.get("scripts", {})
             return scripts.get(field_key.split(".", 1)[1])
+        if section_key == "Update":
+            update = metadata_dict.get("update", {})
+            return update.get(field_key.split(".", 1)[1])
         if section_key == "Groups":
             return metadata_dict.get("groups")
         if section_key == "Depends on":
@@ -793,6 +837,29 @@ class MetadataEditor(MetadataWizard):
                 scripts.pop(subfield, None)
             if not scripts:
                 metadata_dict.pop("scripts", None)
+            return
+
+        if section_key == "Update":
+            update = metadata_dict.setdefault("update", {"strategy": "auto"})
+            subfield = field_key.split(".", 1)[1]
+            if subfield == "strategy":
+                update["strategy"] = self._ask_select(
+                    "Update strategy",
+                    ["auto", "docker", "git", "composer", "command", "none"],
+                    str(update.get("strategy", "auto")),
+                )
+            elif subfield == "command":
+                update["command"] = self._ask_text(
+                    "Update command", str(update.get("command", ""))
+                ) or None
+            elif subfield == "path":
+                update["path"] = self._ask_text(
+                    "Update path", str(update.get("path", ""))
+                ) or None
+            elif subfield == "branch":
+                update["branch"] = self._ask_text(
+                    "Git branch", str(update.get("branch", ""))
+                ) or None
             return
 
         if section_key == "Groups":

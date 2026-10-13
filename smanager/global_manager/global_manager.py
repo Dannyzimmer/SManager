@@ -38,9 +38,9 @@ class GlobalManager(BaseGlobalManager):
         """Get all services that depend on the specified dependency."""
         return [s for s in self.services if s.metadata.depends_on and dependency_name in s.metadata.depends_on]
     
-    def manage_service(self, service_id: str, action: str):
+    def manage_service(self, service_id: str, action: str, dry_run: bool = False):
         """Manage a service by performing the specified action (start, stop, restart,
-        enable, disable).
+        update, enable, disable).
         """
         service = self._find_service_by_id(service_id)
         manager = self.get_service_manager(service)
@@ -52,6 +52,8 @@ class GlobalManager(BaseGlobalManager):
                 manager.stop()
             elif action == "restart":
                 manager.restart()
+            elif action == "update":
+                manager.update(dry_run=dry_run)
             elif action == "enable":
                 manager.enable()
             elif action == "disable":
@@ -61,12 +63,17 @@ class GlobalManager(BaseGlobalManager):
         except Exception:
             raise
 
-    def _collect_failures(self, services: list[Service], action: str) -> list[tuple[str, BaseException]]:
+    def _collect_failures(
+        self,
+        services: list[Service],
+        action: str,
+        dry_run: bool = False,
+    ) -> list[tuple[str, BaseException]]:
         """Run *action* on every service, collecting failures instead of aborting."""
         failures: list[tuple[str, BaseException]] = []
         for service in services:
             try:
-                self.manage_service(service.metadata.id, action)
+                self.manage_service(service.metadata.id, action, dry_run=dry_run)
             except Exception as exc:  # noqa: BLE001 - report and continue with the rest
                 failures.append((service.metadata.id, exc))
         return failures
@@ -78,16 +85,23 @@ class GlobalManager(BaseGlobalManager):
             f"'{action}' failed for {len(failures)}/{len(services)} service(s): {details}"
         )
 
-    def _manage_collection(self, scope: str, identifier: str, services: list[Service], action: str):
+    def _manage_collection(
+        self,
+        scope: str,
+        identifier: str,
+        services: list[Service],
+        action: str,
+        dry_run: bool = False,
+    ):
         self._emit_event(
             scope=scope,
             action=action,
             phase="before",
             group_name=identifier if scope == "group" else None,
             dependency_name=identifier if scope == "dependency" else None,
-            payload={"service_count": len(services)},
+            payload={"service_count": len(services), "dry_run": dry_run},
         )
-        failures = self._collect_failures(services, action)
+        failures = self._collect_failures(services, action, dry_run=dry_run)
         if failures:
             error = RuntimeError(self._failure_summary(action, services, failures))
             self._emit_event(
@@ -109,33 +123,33 @@ class GlobalManager(BaseGlobalManager):
             phase="after",
             group_name=identifier if scope == "group" else None,
             dependency_name=identifier if scope == "dependency" else None,
-            payload={"service_count": len(services)},
+            payload={"service_count": len(services), "dry_run": dry_run},
         )
         
-    def manage_group(self, group_name: str, action: str):
+    def manage_group(self, group_name: str, action: str, dry_run: bool = False):
         """Manage all services in a group by performing the specified action 
-        (start, stop, restart, enable, disable).
+        (start, stop, restart, update, enable, disable).
         """
         services = self.get_group(group_name)
-        self._manage_collection("group", group_name, services, action)
+        self._manage_collection("group", group_name, services, action, dry_run=dry_run)
 
-    def manage_by_dependency(self, dependency_name: str, action: str):
+    def manage_by_dependency(self, dependency_name: str, action: str, dry_run: bool = False):
         """Manage all services that depend on a specific dependency by performing the 
-        specified action (start, stop, restart, enable, disable).
+        specified action (start, stop, restart, update, enable, disable).
         """
         services = self.get_services_by_dependency(dependency_name)
-        self._manage_collection("dependency", dependency_name, services, action)
+        self._manage_collection("dependency", dependency_name, services, action, dry_run=dry_run)
     
-    def manage_all(self, action: str):
+    def manage_all(self, action: str, dry_run: bool = False):
         """Manage all services by performing the specified action (start, stop, restart, 
-        enable, disable)."""
+        update, enable, disable)."""
         self._emit_event(
             scope="all",
             action=action,
             phase="before",
-            payload={"service_count": len(self.services)},
+            payload={"service_count": len(self.services), "dry_run": dry_run},
         )
-        failures = self._collect_failures(self.services, action)
+        failures = self._collect_failures(self.services, action, dry_run=dry_run)
         if failures:
             error = RuntimeError(self._failure_summary(action, self.services, failures))
             self._emit_event(
@@ -153,7 +167,7 @@ class GlobalManager(BaseGlobalManager):
             scope="all",
             action=action,
             phase="after",
-            payload={"service_count": len(self.services)},
+            payload={"service_count": len(self.services), "dry_run": dry_run},
         )
         
     def get_status(self, service_id: str) -> ServiceStatus:

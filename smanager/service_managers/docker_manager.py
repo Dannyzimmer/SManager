@@ -35,6 +35,13 @@ class DockerManager(BaseSDV2Manager):
         compose_file = self._get_compose_file_path()
         self.subprocess_run(["docker", "compose", "-f", compose_file, "down"])
 
+    def _update_docker_commands(self) -> list[list[str]]:
+        compose_file = self._get_compose_file_path()
+        return [
+            ["docker", "compose", "-f", compose_file, "pull", "--ignore-pull-failures"],
+            ["docker", "compose", "-f", compose_file, "up", "-d", "--build"],
+        ]
+
     def status(self) -> ServiceStatus:
         """Check the status of all containers in the Docker service and return a
         ServiceStatus object.

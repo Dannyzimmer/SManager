@@ -63,12 +63,18 @@ class LocalSection:
         )
 
 
+ADDITIONAL_REQUIRED_SCRIPTS = ("start", "stop", "restart", "status", "update")
+
+UPDATE_STRATEGIES = ("auto", "docker", "git", "composer", "command", "none")
+
+
 @dataclass
 class ScriptSection:
     start: Optional[str] = None
     stop: Optional[str] = None
     restart: Optional[str] = None
     status: Optional[str] = None
+    update: Optional[str] = None
     working_dir: Optional[str] = None
     env: Optional[dict] = None
 
@@ -79,6 +85,7 @@ class ScriptSection:
             stop=data.get('stop'),
             restart=data.get('restart'),
             status=data.get('status'),
+            update=data.get('update'),
             working_dir=data.get('working_dir'),
             env=data.get('env'),
         )
@@ -89,7 +96,45 @@ class ScriptSection:
         return bool(str(value).strip()) if value is not None else False
 
     def has_any(self) -> bool:
-        return any(self.overrides(action) for action in ("start", "stop", "restart", "status"))
+        return any(self.overrides(action) for action in ADDITIONAL_REQUIRED_SCRIPTS)
+
+
+@dataclass
+class UpdateSection:
+    """Opt-in configuration for the ``update`` command.
+
+    Presence of this section enables explicit strategies and, with
+    ``strategy: auto``, best-effort detection of git/composer projects.
+    """
+
+    strategy: str = "auto"
+    command: Optional[str] = None
+    path: Optional[str] = None
+    branch: Optional[str] = None
+    args: Optional[list] = None
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'UpdateSection':
+        return cls(
+            strategy=data.get('strategy', 'auto'),
+            command=data.get('command'),
+            path=data.get('path'),
+            branch=data.get('branch'),
+            args=data.get('args'),
+        )
+
+    def __post_init__(self):
+        if self.strategy not in UPDATE_STRATEGIES:
+            raise ValueError(
+                "UpdateSection 'strategy' must be one of "
+                f"{', '.join(UPDATE_STRATEGIES)}."
+            )
+        if self.strategy == "command" and (not self.command or not str(self.command).strip()):
+            raise ValueError(
+                "UpdateSection with strategy 'command' must define a non-empty 'command'."
+            )
+        if self.args is not None and not isinstance(self.args, list):
+            raise ValueError("UpdateSection 'args' must be a list when provided.")
 
 
 @dataclass
@@ -138,6 +183,7 @@ class ServiceMetadata:
     local: Optional[LocalSection] = None
     php: Optional[PHPSection] = None
     scripts: Optional[ScriptSection] = None
+    update: Optional[UpdateSection] = None
     vpn: Optional[VPNSection] = None
     depends_on: Optional[list] = None
 
@@ -162,7 +208,7 @@ class ServiceMetadata:
             )
 
         if self.scripts is not None:
-            for action in ("start", "stop", "restart", "status"):
+            for action in ADDITIONAL_REQUIRED_SCRIPTS:
                 value = getattr(self.scripts, action, None)
                 if value is not None and not str(value).strip():
                     raise ValueError(
@@ -261,6 +307,9 @@ class ServiceMetadata:
         scripts_data = data.get('scripts')
         scripts = ScriptSection.from_dict(scripts_data) if scripts_data is not None else None
 
+        update_data = data.get('update')
+        update = UpdateSection.from_dict(update_data) if update_data is not None else None
+
         vpn_data = data.get('vpn')
         vpn = VPNSection(**vpn_data) if vpn_data is not None else None
 
@@ -276,6 +325,7 @@ class ServiceMetadata:
             local=local,
             php=php,
             scripts=scripts,
+            update=update,
             vpn=vpn,
             depends_on=data.get('depends_on')
         )

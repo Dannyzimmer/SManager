@@ -34,6 +34,15 @@ def _format_event_for_cli(event: ManagerEvent, command_scope: str) -> str | None
         reason = event.message or "Operation skipped."
         return f"[SKIP] '{event.action}' on service '{service_id}': {reason}"
 
+    if event.action == "update" and event.phase == "after":
+        if event.scope == "service":
+            return _format_update_event(event)
+        if event.scope == command_scope:
+            target = _event_target(event)
+            prefix = "DRY-RUN" if (event.payload or {}).get("dry_run") else "OK"
+            return f"[{prefix}] 'update' on {target}."
+        return None
+
     if event.phase != "after":
         return None
 
@@ -58,19 +67,36 @@ def _format_event_for_cli(event: ManagerEvent, command_scope: str) -> str | None
     return None
 
 
-def _format_failed_event(event: ManagerEvent) -> str:
+def _event_target(event: ManagerEvent) -> str:
     if event.scope == "service":
-        target = f"service '{event.service_id or '<unknown>'}'"
-    elif event.scope == "group":
-        target = f"group '{event.group_name or '<unknown>'}'"
-    elif event.scope == "dependency":
-        target = (
-            f"services depending on '{event.dependency_name or '<unknown>'}'"
-        )
-    elif event.scope == "all":
-        target = "all services"
-    else:
-        target = event.scope
+        return f"service '{event.service_id or '<unknown>'}'"
+    if event.scope == "group":
+        return f"group '{event.group_name or '<unknown>'}'"
+    if event.scope == "dependency":
+        return f"services depending on '{event.dependency_name or '<unknown>'}'"
+    if event.scope == "all":
+        return "all services"
+    return event.scope
+
+
+def _format_update_event(event: ManagerEvent) -> str:
+    target = _event_target(event)
+    payload = event.payload or {}
+    strategy = payload.get("strategy")
+    commands = payload.get("commands") or []
+
+    if payload.get("dry_run"):
+        header = f"[DRY-RUN] 'update' on {target} (strategy: {strategy}):"
+        lines = [header]
+        for command in commands:
+            lines.append(f"    {' '.join(str(part) for part in command)}")
+        return "\n".join(lines)
+
+    return f"[OK] 'update' on {target} (strategy: {strategy})."
+
+
+def _format_failed_event(event: ManagerEvent) -> str:
+    target = _event_target(event)
 
     if event.error is None:
         detail = "unknown error"

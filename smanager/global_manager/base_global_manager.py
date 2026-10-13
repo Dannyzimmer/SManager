@@ -76,27 +76,27 @@ class BaseGlobalManager:
         raise NotImplementedError("get_services_by_dependency method must be implemented by subclasses.")
     
     @abstractmethod
-    def manage_service(self, service_id: str, action: str):
-        """Manage a service by performing the specified action (start, stop, restart, enable, disable)."""
+    def manage_service(self, service_id: str, action: str, dry_run: bool = False):
+        """Manage a service by performing the specified action (start, stop, restart, update, enable, disable)."""
         raise NotImplementedError("manage_service method must be implemented by subclasses.")
     
     @abstractmethod
-    def manage_group(self, group_name: str, action: str):
+    def manage_group(self, group_name: str, action: str, dry_run: bool = False):
         """Manage all services in a group by performing the specified action 
-        (start, stop, restart).
+        (start, stop, restart, update, enable, disable).
         """
         raise NotImplementedError("manage_group method must be implemented by subclasses.")
     
     @abstractmethod
-    def manage_by_dependency(self, dependency_name: str, action: str):
+    def manage_by_dependency(self, dependency_name: str, action: str, dry_run: bool = False):
         """Manage all services that depend on a specific dependency by performing the 
-        specified action (start, stop, restart, enable, disable).
+        specified action (start, stop, restart, update, enable, disable).
         """
         raise NotImplementedError("manage_by_dependency method must be implemented by subclasses.")
     
     @abstractmethod
-    def manage_all(self, action: str):
-        """Manage all services by performing the specified action (start, stop, restart, enable, disable)."""
+    def manage_all(self, action: str, dry_run: bool = False):
+        """Manage all services by performing the specified action (start, stop, restart, update, enable, disable)."""
         raise NotImplementedError("manage_all method must be implemented by subclasses.")
 
     @abstractmethod

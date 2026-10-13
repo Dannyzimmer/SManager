@@ -12,15 +12,20 @@ def service_cmd(ctx: click.Context) -> None:
     """Manage a single service.
 
     \b
-    Actions: start, stop, restart, enable, disable, status, info
+    Actions: start, stop, restart, update, enable, disable, status, info
     """
 
 
-def _run_service_action(ctx: click.Context, action: str, service_id: str) -> None:
+def _run_service_action(
+    ctx: click.Context,
+    action: str,
+    service_id: str,
+    dry_run: bool = False,
+) -> None:
     manager = get_manager(ctx)
     detach_renderer = attach_cli_event_renderer(manager, command_scope="service")
     try:
-        manager.manage_service(service_id, action)
+        manager.manage_service(service_id, action, dry_run=dry_run)
     except Exception as e:
         raise click.ClickException(str(e))
     finally:
@@ -49,6 +54,15 @@ def service_stop(ctx: click.Context, service_id: str) -> None:
 def service_restart(ctx: click.Context, service_id: str) -> None:
     """Restart a single service."""
     _run_service_action(ctx, "restart", service_id)
+
+
+@service_cmd.command(name="update")
+@click.argument("service_id")
+@click.option("--dry-run", is_flag=True, default=False, help="Show what would run without executing it.")
+@click.pass_context
+def service_update(ctx: click.Context, service_id: str, dry_run: bool) -> None:
+    """Update a single service to the latest available version."""
+    _run_service_action(ctx, "update", service_id, dry_run=dry_run)
 
 
 @service_cmd.command(name="enable")

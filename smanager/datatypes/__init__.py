@@ -1,6 +1,6 @@
 from .sd_info_v2 import (
     ServiceMetadata, RuntimeSection, PortSection, 
-    DockerSection, LocalSection, PHPSection, ScriptSection, Service
+    DockerSection, LocalSection, PHPSection, ScriptSection, UpdateSection, Service
 )
 from .config import GlobalConfig
 from .service_status import ServiceStatus, SingleStatus, MultiStatus
@@ -13,6 +13,7 @@ __all__ = [
     "LocalSection",
     "PHPSection",
     "ScriptSection",
+    "UpdateSection",
     "GlobalConfig",
     "Service",
     "ServiceStatus",
