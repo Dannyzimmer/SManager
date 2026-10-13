@@ -716,6 +716,8 @@ class MetadataEditor(MetadataWizard):
                 "scripts.stop",
                 "scripts.restart",
                 "scripts.status",
+                "scripts.update",
+                "scripts.check_update",
                 "scripts.working_dir",
             ]
         elif section_key == "Update":
@@ -758,34 +760,53 @@ class MetadataEditor(MetadataWizard):
             return ", ".join(str(item) for item in value) or "-"
         return str(value)
 
+    @staticmethod
+    def _as_dict(value: Any) -> dict[str, Any]:
+        """Return *value* when it is a mapping, otherwise an empty dict."""
+        return value if isinstance(value, dict) else {}
+
+    @staticmethod
+    def _ensure_mapping(container: dict[str, Any], key: str) -> dict[str, Any]:
+        """Return ``container[key]`` as a dict, creating it when missing or null."""
+        value = container.get(key)
+        if not isinstance(value, dict):
+            value = {}
+            container[key] = value
+        return value
+
+    def _default_webui_port(self, metadata_dict: dict[str, Any]) -> int:
+        runtime = self._as_dict(metadata_dict.get("runtime"))
+        ports = self._as_dict(runtime.get("ports"))
+        return int(ports.get("webui", 8080))
+
     def _get_field_value(self, section_key: str, field_key: str, metadata_dict: dict[str, Any]) -> Any:
         if section_key == "Identity":
             return metadata_dict.get(field_key)
         if section_key == "Runtime":
-            runtime = metadata_dict.get("runtime", {})
+            runtime = self._as_dict(metadata_dict.get("runtime"))
             if field_key == "ports.webui":
-                return runtime.get("ports", {}).get("webui")
+                return self._as_dict(runtime.get("ports")).get("webui")
             return runtime.get(field_key)
         if section_key == "Runtime details":
             if field_key.startswith("docker."):
-                docker = metadata_dict.get("docker", {})
+                docker = self._as_dict(metadata_dict.get("docker"))
                 return docker.get(field_key.split(".", 1)[1])
             if field_key.startswith("php."):
-                php = metadata_dict.get("php", {})
+                php = self._as_dict(metadata_dict.get("php"))
                 return php.get(field_key.split(".", 1)[1])
-            local = metadata_dict.get("local", {})
+            local = self._as_dict(metadata_dict.get("local"))
             return local.get(field_key.split(".", 1)[1])
         if section_key == "Scripts":
-            scripts = metadata_dict.get("scripts", {})
+            scripts = self._as_dict(metadata_dict.get("scripts"))
             return scripts.get(field_key.split(".", 1)[1])
         if section_key == "Update":
-            update = metadata_dict.get("update", {})
+            update = self._as_dict(metadata_dict.get("update"))
             return update.get(field_key.split(".", 1)[1])
         if section_key == "Version":
-            version = metadata_dict.get("version", {})
+            version = self._as_dict(metadata_dict.get("version"))
             subfield = field_key.split(".", 1)[1]
             if subfield.startswith("latest."):
-                latest = version.get("latest", {})
+                latest = self._as_dict(version.get("latest"))
                 return latest.get(subfield.split(".", 1)[1])
             return version.get(subfield)
         if section_key == "Groups":
@@ -793,7 +814,7 @@ class MetadataEditor(MetadataWizard):
         if section_key == "Depends on":
             return metadata_dict.get("depends_on")
         if section_key == "VPN":
-            vpn = metadata_dict.get("vpn", {})
+            vpn = self._as_dict(metadata_dict.get("vpn"))
             return vpn.get(field_key)
         if section_key == "Active":
             return metadata_dict.get("active")
@@ -810,14 +831,14 @@ class MetadataEditor(MetadataWizard):
             return
 
         if section_key == "Runtime":
-            runtime = metadata_dict.setdefault("runtime", {})
+            runtime = self._ensure_mapping(metadata_dict, "runtime")
             if field_key == "type":
                 runtime_type = self._ask_select("Runtime type", ["docker", "local", "php"], str(runtime.get("type", "local")))
                 runtime["type"] = runtime_type
                 self._sync_runtime_sections(metadata_dict)
                 return
 
-            ports = runtime.setdefault("ports", {})
+            ports = self._ensure_mapping(runtime, "ports")
             if field_key == "ports.webui":
                 ports["webui"] = self._ask_int("Web UI port", int(ports.get("webui", 8080)))
                 return
@@ -832,7 +853,7 @@ class MetadataEditor(MetadataWizard):
 
         if section_key == "Runtime details":
             if field_key.startswith("docker."):
-                docker = metadata_dict.setdefault("docker", {})
+                docker = self._ensure_mapping(metadata_dict, "docker")
                 subfield = field_key.split(".", 1)[1]
                 if subfield == "compose_file":
                     docker["compose_file"] = self._ask_text("Compose file", str(docker.get("compose_file", "compose.yaml")))
@@ -843,9 +864,9 @@ class MetadataEditor(MetadataWizard):
                 return
 
             if field_key.startswith("php."):
-                php = metadata_dict.setdefault("php", {})
+                php = self._ensure_mapping(metadata_dict, "php")
                 subfield = field_key.split(".", 1)[1]
-                default_port = int(metadata_dict.get("runtime", {}).get("ports", {}).get("webui", 8080))
+                default_port = self._default_webui_port(metadata_dict)
                 if subfield == "start_command":
                     php["start_command"] = self._ask_text("Start command", str(php.get("start_command", "php-fpm")))
                 elif subfield == "stop_command":
@@ -872,7 +893,7 @@ class MetadataEditor(MetadataWizard):
                     )
                 return
 
-            local = metadata_dict.setdefault("local", {})
+            local = self._ensure_mapping(metadata_dict, "local")
             service_id = str(metadata_dict.get("id", "service"))
             subfield = field_key.split(".", 1)[1]
             if subfield == "installation_path":
@@ -886,7 +907,7 @@ class MetadataEditor(MetadataWizard):
             return
 
         if section_key == "Scripts":
-            scripts = metadata_dict.setdefault("scripts", {})
+            scripts = self._ensure_mapping(metadata_dict, "scripts")
             subfield = field_key.split(".", 1)[1]
             if subfield == "working_dir":
                 value = self._ask_text(
@@ -907,7 +928,7 @@ class MetadataEditor(MetadataWizard):
             return
 
         if section_key == "Update":
-            update = metadata_dict.setdefault("update", {"strategy": "auto"})
+            update = self._ensure_mapping(metadata_dict, "update")
             subfield = field_key.split(".", 1)[1]
             if subfield == "strategy":
                 update["strategy"] = self._ask_select(
@@ -930,7 +951,7 @@ class MetadataEditor(MetadataWizard):
             return
 
         if section_key == "Version":
-            version = metadata_dict.setdefault("version", {})
+            version = self._ensure_mapping(metadata_dict, "version")
             subfield = field_key.split(".", 1)[1]
             if subfield == "current_command":
                 version["current_command"] = self._ask_text(
@@ -941,7 +962,7 @@ class MetadataEditor(MetadataWizard):
                     "Version regex", str(version.get("regex", ""))
                 ) or None
             elif subfield.startswith("latest."):
-                latest = version.setdefault("latest", {"strategy": "auto"})
+                latest = self._ensure_mapping(version, "latest")
                 key = subfield.split(".", 1)[1]
                 if key == "strategy":
                     latest["strategy"] = self._ask_select(
@@ -969,7 +990,7 @@ class MetadataEditor(MetadataWizard):
             return
 
         if section_key == "VPN":
-            vpn = metadata_dict.setdefault("vpn", {})
+            vpn = self._ensure_mapping(metadata_dict, "vpn")
             if field_key == "serve_https":
                 vpn["serve_https"] = self._ask_confirm("Serve HTTPS through VPN", bool(vpn.get("serve_https", False)))
             elif field_key == "https_restart_delay":
@@ -980,43 +1001,40 @@ class MetadataEditor(MetadataWizard):
             metadata_dict["active"] = self._ask_confirm("Enable service", bool(metadata_dict.get("active", True)))
 
     def _sync_runtime_sections(self, metadata_dict: dict[str, Any]) -> None:
-        runtime = metadata_dict.setdefault("runtime", {})
+        runtime = self._ensure_mapping(metadata_dict, "runtime")
         runtime_type = str(runtime.get("type", "local"))
 
         if runtime_type == "docker":
             metadata_dict.pop("local", None)
             metadata_dict.pop("php", None)
-            metadata_dict.setdefault("docker", {"compose_file": "compose.yaml", "containers": None})
+            if not isinstance(metadata_dict.get("docker"), dict):
+                metadata_dict["docker"] = {"compose_file": "compose.yaml", "containers": None}
             return
 
         if runtime_type == "php":
             metadata_dict.pop("docker", None)
             metadata_dict.pop("local", None)
-            default_port = int(runtime.get("ports", {}).get("webui", 8080))
-            metadata_dict.setdefault(
-                "php",
-                {
+            default_port = self._default_webui_port(metadata_dict)
+            if not isinstance(metadata_dict.get("php"), dict):
+                metadata_dict["php"] = {
                     "start_command": "php-fpm",
                     "stop_command": "pkill -f php-fpm",
                     "status_command": None,
                     "healthcheck_url": f"http://localhost:{default_port}/health",
                     "healthcheck_timeout": 3,
                     "working_dir": ".",
-                },
-            )
+                }
             return
 
         metadata_dict.pop("docker", None)
         metadata_dict.pop("php", None)
         service_id = str(metadata_dict.get("id", "service"))
-        metadata_dict.setdefault(
-            "local",
-            {
+        if not isinstance(metadata_dict.get("local"), dict):
+            metadata_dict["local"] = {
                 "installation_path": f"/opt/{service_id}",
                 "appdata_path": f"/var/lib/{service_id}",
                 "systemd_services": [service_id],
-            },
-        )
+            }
 
     def _review_current_changes(self, metadata_dict: dict[str, Any], target_path: Path) -> None:
         self._render_editor_header(target_path, "Reviewing current changes")
@@ -1057,91 +1075,6 @@ class MetadataEditor(MetadataWizard):
         except json.JSONDecodeError as exc:
             raise click.ClickException(f"Invalid JSON metadata file: {path}") from exc
 
-    def _edit_identity(self, metadata_dict: dict[str, Any]) -> None:
-        metadata_dict["name"] = self._ask_text("Service name", str(metadata_dict.get("name", "")))
-        metadata_dict["description"] = self._ask_text("Description", str(metadata_dict.get("description", "")))
-        metadata_dict["id"] = self._ask_text("Service id", str(metadata_dict.get("id", "")))
-
-    def _edit_runtime(self, metadata_dict: dict[str, Any]) -> None:
-        runtime = metadata_dict.setdefault("runtime", {})
-        runtime_type = self._ask_select("Runtime type", ["docker", "local", "php"], str(runtime.get("type", "local")))
-        runtime["type"] = runtime_type
-
-        ports = runtime.setdefault("ports", {})
-        ports["webui"] = self._ask_int("Web UI port", int(ports.get("webui", 8080)))
-        runtime["sys_user"] = self._ask_text("System user", str(runtime.get("sys_user", self._default_system_user())))
-        runtime["sys_group"] = self._ask_text("System group", str(runtime.get("sys_group", self._default_system_group())))
-
-        if runtime_type == "docker":
-            metadata_dict.pop("local", None)
-            metadata_dict.pop("php", None)
-            metadata_dict.setdefault("docker", {"compose_file": "compose.yaml", "containers": None})
-        elif runtime_type == "php":
-            metadata_dict.pop("docker", None)
-            metadata_dict.pop("local", None)
-            metadata_dict.setdefault(
-                "php",
-                {
-                    "start_command": "php-fpm",
-                    "stop_command": "pkill -f php-fpm",
-                    "status_command": None,
-                    "healthcheck_url": f"http://localhost:{ports['webui']}/health",
-                    "healthcheck_timeout": 3,
-                    "working_dir": ".",
-                },
-            )
-        else:
-            metadata_dict.pop("docker", None)
-            metadata_dict.pop("php", None)
-            service_id = str(metadata_dict.get("id", "service"))
-            metadata_dict.setdefault(
-                "local",
-                {
-                    "installation_path": f"/opt/{service_id}",
-                    "appdata_path": f"/var/lib/{service_id}",
-                    "systemd_services": [service_id],
-                },
-            )
-
-    def _edit_runtime_details(self, metadata_dict: dict[str, Any]) -> None:
-        runtime_type = metadata_dict.get("runtime", {}).get("type", "local")
-        if runtime_type == "docker":
-            docker = metadata_dict.setdefault("docker", {})
-            docker["compose_file"] = self._ask_text("Compose file", str(docker.get("compose_file", "compose.yaml")))
-            containers = docker.get("containers") or []
-            containers_csv = ", ".join(containers)
-            parsed = parse_csv(self._ask_text("Containers (comma-separated)", containers_csv))
-            docker["containers"] = parsed or None
-            return
-
-        if runtime_type == "php":
-            php = metadata_dict.setdefault("php", {})
-            default_port = int(metadata_dict.get("runtime", {}).get("ports", {}).get("webui", 8080))
-            php["start_command"] = self._ask_text("Start command", str(php.get("start_command", "php-fpm")))
-            php["stop_command"] = self._ask_text("Stop command", str(php.get("stop_command", "pkill -f php-fpm")))
-            php["status_command"] = self._ask_text(
-                "Status command (optional)",
-                str(php.get("status_command", "")),
-            ) or None
-            php["healthcheck_url"] = self._ask_text(
-                "Healthcheck URL",
-                str(php.get("healthcheck_url", f"http://localhost:{default_port}/health")),
-            )
-            php["healthcheck_timeout"] = self._ask_int(
-                "Healthcheck timeout (seconds)",
-                int(php.get("healthcheck_timeout", 3)),
-            )
-            php["working_dir"] = self._ask_text("Working directory", str(php.get("working_dir", ".")))
-            return
-
-        local = metadata_dict.setdefault("local", {})
-        service_id = str(metadata_dict.get("id", "service"))
-        local["installation_path"] = self._ask_text("Installation path", str(local.get("installation_path", f"/opt/{service_id}")))
-        local["appdata_path"] = self._ask_text("Appdata path", str(local.get("appdata_path", f"/var/lib/{service_id}")))
-        services = local.get("systemd_services") or [service_id]
-        parsed_services = parse_csv(self._ask_text("Systemd services (comma-separated)", ", ".join(services)))
-        local["systemd_services"] = parsed_services or [service_id]
-
     def _edit_groups(self, metadata_dict: dict[str, Any], target_path: Path) -> None:
         current = metadata_dict.get("groups") or []
         available = sorted(set(self._existing_groups(target_path.parent) + current))
@@ -1152,8 +1085,3 @@ class MetadataEditor(MetadataWizard):
         current = metadata_dict.get("depends_on") or []
         available = sorted(set(self._existing_dependencies(target_path.parent, service_id) + current) - {service_id})
         metadata_dict["depends_on"] = self._ask_dependencies(available) or None
-
-    def _edit_vpn(self, metadata_dict: dict[str, Any]) -> None:
-        vpn = metadata_dict.setdefault("vpn", {})
-        vpn["serve_https"] = self._ask_confirm("Serve HTTPS through VPN", bool(vpn.get("serve_https", False)))
-        vpn["https_restart_delay"] = self._ask_int("HTTPS restart delay", int(vpn.get("https_restart_delay", 5)))

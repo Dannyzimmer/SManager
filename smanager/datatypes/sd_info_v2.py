@@ -433,10 +433,36 @@ class ServiceMetadata:
     @classmethod
     def from_json(cls, json_str: str) -> 'ServiceMetadata':
         return cls.from_dict(json.loads(json_str))
-    
+
+    def to_dict(self) -> dict:
+        """Return a JSON-friendly dict, recursing through dataclasses and
+        omitting ``None`` values so metadata files stay clean.
+        """
+
+        def encode(value):
+            if value is None:
+                return None
+            if isinstance(value, list):
+                return [encode(item) for item in value]
+            if isinstance(value, dict):
+                return {
+                    key: encode(item)
+                    for key, item in value.items()
+                    if item is not None
+                }
+            if hasattr(value, '__dataclass_fields__'):
+                return {
+                    field: encoded
+                    for field in value.__dataclass_fields__
+                    if (encoded := encode(getattr(value, field))) is not None
+                }
+            return value
+
+        return encode(self)
+
     def write_to_json(self, file_path: str):
         with open(file_path, 'w') as f:
-            json.dump(self.__dict__, f, default=lambda o: o.__dict__, indent=4)
+            json.dump(self.to_dict(), f, indent=4)
 
 @dataclass
 class Service:
