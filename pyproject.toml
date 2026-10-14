@@ -25,3 +25,4 @@ version = {attr = "smanager.__version__"}
 
 [project.scripts]
 smanager = "smanager.cli.main:cli"
+smanagerd = "smanager.daemon.server:main"

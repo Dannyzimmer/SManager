@@ -405,6 +405,23 @@ Alternatively, add a polkit rule granting `org.freedesktop.systemd1.manage-units
 for that unit to your user. `systemctl is-active` (used by `status`) never needs
 privileges.
 
+## Privileged daemon (`smanagerd`, experimental)
+
+To avoid granting per-command `sudo`/polkit rights, SManager is moving to the classic
+privileged-daemon pattern: a root (or dedicated) `smanagerd` exposes a narrow, validated
+API over a local Unix socket, and the CLI talks to it as an unprivileged client (falling
+back to local execution when the daemon is unavailable).
+
+The full design (architecture, NDJSON protocol, authorization/trust model, threat model,
+decisions and phased plan) lives in [`docs/design/smanagerd.md`](docs/design/smanagerd.md).
+
+Phase 1 (current) ships the protocol, a minimal daemon and an unprivileged client; the CLI
+is not wired to it yet (feature-flag). You can run it manually:
+
+```bash
+smanagerd --config /path/smanager.yaml --socket /run/smanager/smanagerd.sock
+```
+
 ## Notes
 - `metadata init` creates a new file.
 - `metadata edit` modifies an existing file.
