@@ -450,6 +450,12 @@ You can also run the daemon manually:
 smanagerd --config /path/smanager.yaml --socket /run/smanager/smanagerd.sock
 ```
 
+> **Troubleshooting.** If the first action seems to hang, upgrade to >= 0.14.4 (which
+> implements systemd socket activation) and reinstall cleanly:
+> `sudo "$(command -v smanager)" daemon uninstall`, `sudo rm -f /run/smanager/smanagerd.sock`,
+> `sudo "$(command -v smanager)" daemon install`, `sudo systemctl restart smanagerd.socket`.
+> As a safety net, `smanager --no-daemon <command>` always runs locally.
+
 > **Security:** membership in the socket group (`srvmgrs`) lets a user manage
 > services as the daemon does (effectively root). Add only trusted users.
 

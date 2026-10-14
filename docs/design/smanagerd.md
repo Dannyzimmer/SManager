@@ -212,4 +212,13 @@ Entry point `smanagerd = smanager.daemon.server:main`.
   for the drop mechanism. `NoNewPrivileges`/`CapabilityBoundingSet`/polkit minimum-privilege
   recipes remain to be applied in the generated unit as a follow-up.
 
+### Fixes after initial release
+
+- **Socket activation** is now implemented: when started by systemd the daemon adopts the
+  inherited listening fd (`LISTEN_PID`/`LISTEN_FDS`, fd 3) instead of binding its own socket.
+  Previously the connection that triggered activation was left unaccepted on systemd's socket,
+  so the first client request appeared to hang until timeout.
+- The client falls back to local execution (with a warning) when the daemon does not answer the
+  handshake in time, and uses a short connect timeout separate from the action timeout.
+
 See [`SECURITY.md`](../../SECURITY.md) for the trust model.

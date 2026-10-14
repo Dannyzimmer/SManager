@@ -49,9 +49,16 @@ def get_daemon_client(ctx: click.Context) -> DaemonClient | None:
     client = DaemonClient(socket_path(ctx))
     try:
         client.connect()
-    except DaemonConnectionError as exc:
+    except (DaemonConnectionError, DaemonError) as exc:
         if _mode(ctx) is True:
-            raise click.ClickException(str(exc))
+            raise click.ClickException(
+                f"{exc}. The daemon is not responding; check 'smanager daemon status' "
+                "and 'smanager daemon logs', or run with --no-daemon."
+            )
+        click.echo(
+            f"warning: smanagerd unavailable ({exc}); falling back to local execution",
+            err=True,
+        )
         return None
     return client
 

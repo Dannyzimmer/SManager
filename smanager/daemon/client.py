@@ -32,9 +32,15 @@ def is_available(socket_path: str = DEFAULT_SOCKET_PATH) -> bool:
 
 
 class DaemonClient:
-    def __init__(self, socket_path: str = DEFAULT_SOCKET_PATH, timeout: float = protocol.DEFAULT_TIMEOUT):
+    def __init__(
+        self,
+        socket_path: str = DEFAULT_SOCKET_PATH,
+        timeout: float = protocol.DEFAULT_TIMEOUT,
+        connect_timeout: float = 5.0,
+    ):
         self.socket_path = socket_path
         self.timeout = timeout
+        self.connect_timeout = connect_timeout
         self._sock: Optional[socket.socket] = None
         self._rfile = None
         self._wfile = None
@@ -46,7 +52,7 @@ class DaemonClient:
         if self._sock is not None:
             return self
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        sock.settimeout(self.timeout)
+        sock.settimeout(self.connect_timeout)
         try:
             sock.connect(self.socket_path)
         except OSError as exc:
@@ -155,7 +161,7 @@ class DaemonClient:
         return self._read(deadline, on_event, request_id)
 
     def _hello(self) -> None:
-        result = self._call("hello", {"protocol": protocol.PROTOCOL_VERSION}, None, self.timeout)
+        result = self._call("hello", {"protocol": protocol.PROTOCOL_VERSION}, None, self.connect_timeout)
         self._handshaken = True
         return result
 

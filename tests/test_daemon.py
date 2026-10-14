@@ -249,7 +249,7 @@ def test_request_timeout_via_silent_server():
 
     threading.Thread(target=accept_and_silence, daemon=True).start()
     try:
-        client = DaemonClient(socket_path, timeout=0.3)
+        client = DaemonClient(socket_path, timeout=0.3, connect_timeout=0.3)
         with pytest.raises(DaemonError) as exc:
             client.connect()
         assert exc.value.code == protocol.ERR_TIMEOUT
@@ -327,6 +327,65 @@ def test_cli_daemon_forced_but_down():
     )
     assert result.exit_code != 0
     assert "cannot connect" in result.output.lower()
+
+
+def test_daemon_adopts_systemd_socket(tmp_path, monkeypatch):
+    import socket as socket_module
+
+    from smanager.daemon import server as server_mod
+
+    manager = FakeManager([_make_service(tmp_path, "demo")])
+    runtime_dir = tempfile.mkdtemp(prefix="smd-act-")
+    socket_path = os.path.join(runtime_dir, "s.sock")
+
+    prepared = socket_module.socket(socket_module.AF_UNIX, socket_module.SOCK_STREAM)
+    prepared.bind(socket_path)
+    prepared.listen(1)
+    monkeypatch.setattr(server_mod, "_systemd_socket", lambda: prepared)
+
+    daemon = server_mod.DaemonServer(manager, socket_path)
+    thread = threading.Thread(target=daemon.serve_forever, daemon=True)
+    thread.start()
+    for _ in range(200):
+        if os.path.exists(socket_path):
+            break
+        time.sleep(0.01)
+    time.sleep(0.05)
+    try:
+        assert daemon._owns_socket is False
+        with DaemonClient(socket_path, timeout=2, connect_timeout=2) as client:
+            assert client.ping() is True
+    finally:
+        daemon.shutdown()
+        thread.join(timeout=5)
+    # systemd owns the socket; the daemon must not unlink it.
+    assert os.path.exists(socket_path)
+
+
+def test_get_daemon_client_falls_back_on_timeout(tmp_path, monkeypatch):
+    import click
+
+    from smanager.cli import daemon_client as dc
+
+    socket_path = tmp_path / "s.sock"
+    socket_path.write_text("")
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def connect(self):
+            raise DaemonError(protocol.ERR_TIMEOUT, "timed out")
+
+    monkeypatch.setattr(dc, "DaemonClient", FakeClient)
+    ctx = click.Context(click.Command("x"))
+    ctx.obj = {"daemon": None, "daemon_socket": str(socket_path)}
+
+    assert dc.get_daemon_client(ctx) is None  # auto -> fallback
+
+    ctx.obj["daemon"] = True
+    with pytest.raises(click.ClickException):
+        dc.get_daemon_client(ctx)
 
 
 def test_concurrent_clients(daemon_env):

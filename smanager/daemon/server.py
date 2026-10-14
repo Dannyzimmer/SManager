@@ -32,6 +32,28 @@ audit_logger = logging.getLogger("smanagerd.audit")
 SERVICE_ACTIONS = {"start", "stop", "restart"}
 
 DEFAULT_SOCKET_PATH = "/run/smanager/smanagerd.sock"
+LISTEN_FDS_START = 3
+
+
+def _systemd_socket():
+    """Return the socket passed by systemd socket activation, or None.
+
+    systemd sets ``LISTEN_PID``/``LISTEN_FDS`` and passes the listening file
+    descriptor starting at fd 3. When present we must adopt it instead of
+    binding our own socket (otherwise the connection that triggered activation
+    is left unaccepted on systemd's socket and the client hangs).
+    """
+    if os.environ.get("LISTEN_PID") != str(os.getpid()):
+        return None
+    try:
+        count = int(os.environ.get("LISTEN_FDS", "0"))
+    except ValueError:
+        return None
+    if count < 1:
+        return None
+    import socket as _socket
+
+    return _socket.socket(fileno=LISTEN_FDS_START)
 
 
 class DaemonServer:
@@ -52,6 +74,7 @@ class DaemonServer:
         self._tls = threading.local()
         self._locks: dict[str, threading.Lock] = defaultdict(threading.Lock)
         self._server: Optional[_UnixStreamServer] = None
+        self._owns_socket = True
 
         # One global forwarder: it routes events to the handler that is
         # currently executing the request on this thread.
@@ -222,9 +245,23 @@ class DaemonServer:
 
     # -- lifecycle ---------------------------------------------------------
     def _build_server(self) -> "_UnixStreamServer":
+        inherited = _systemd_socket()
+        if inherited is not None:
+            # systemd owns the socket (and its permissions); adopt the fd.
+            server = _UnixStreamServer(self.socket_path, _RequestHandler, bind_and_activate=False)
+            server.socket = inherited
+            server.server_address = self.socket_path
+            server.server_activate()
+            server.daemon = self
+            server.daemon_threads = True
+            self._owns_socket = False
+            logger.info("adopted systemd-activated socket at %s", self.socket_path)
+            return server
+
         server = _UnixStreamServer(self.socket_path, _RequestHandler)
         server.daemon = self
         server.daemon_threads = True
+        self._owns_socket = True
         self._apply_socket_permissions()
         return server
 
@@ -256,10 +293,11 @@ class DaemonServer:
             self._server.serve_forever()
         finally:
             self._server.server_close()
-            try:
-                os.unlink(self.socket_path)
-            except OSError:
-                pass
+            if getattr(self, "_owns_socket", True):
+                try:
+                    os.unlink(self.socket_path)
+                except OSError:
+                    pass
 
     def shutdown(self) -> None:
         if self._server is not None:

@@ -44,6 +44,7 @@ def render_socket_unit(socket_path: str, group: str) -> str:
         "SocketMode=0660\n"
         "SocketUser=root\n"
         f"SocketGroup={group}\n"
+        "DirectoryMode=0755\n"
         "Accept=no\n"
         "\n"
         "[Install]\n"
