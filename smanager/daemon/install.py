@@ -77,7 +77,11 @@ def render_service_unit(
 
 
 def _default_runner(*args, **kwargs) -> subprocess.CompletedProcess:
-    return subprocess.run(*args, capture_output=True, text=True, check=True, **kwargs)
+    # Only provide defaults so callers can override ``check`` (e.g. status).
+    kwargs.setdefault("capture_output", True)
+    kwargs.setdefault("text", True)
+    kwargs.setdefault("check", True)
+    return subprocess.run(*args, **kwargs)
 
 
 @dataclass

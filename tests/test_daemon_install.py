@@ -116,6 +116,35 @@ def test_dry_run_missing_exec_path_notes_but_renders(tmp_path, monkeypatch):
     assert report.files
 
 
+def test_default_runner_honours_check_false():
+    from smanager.daemon.install import _default_runner
+
+    result = _default_runner(["false"], check=False)
+    assert result.returncode != 0  # must not raise with check=False
+
+
+def test_default_runner_defaults_check_true():
+    from smanager.daemon.install import _default_runner
+
+    with pytest.raises(subprocess.CalledProcessError):
+        _default_runner(["false"])
+
+
+def test_status_does_not_duplicate_check():
+    class Runner:
+        def __init__(self):
+            self.kwargs = None
+
+        def __call__(self, args, **kwargs):
+            self.kwargs = kwargs
+            return subprocess.CompletedProcess(args, 0, stdout="active\n", stderr="")
+
+    runner = Runner()
+    info = Installer(run=runner).status()
+    assert info["active"] == "active"
+    assert runner.kwargs.get("check") is False
+
+
 def test_detect_exec_path_sibling(tmp_path, monkeypatch):
     monkeypatch.setattr(shutil, "which", lambda name: None)
     bin_dir = tmp_path / "bin"
