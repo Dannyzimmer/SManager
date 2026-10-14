@@ -200,3 +200,16 @@ Entry point `smanagerd = smanager.daemon.server:main`.
 - **Phase 5**: hardening (privilege drop to `runtime.sys_user` for `scripts.*`/update with
   trusted metadata, `NoNewPrivileges`, `CapabilityBoundingSet`, polkit/min privilege),
   `SECURITY.md`, README/`--help`. Tests: scripts as `sys_user`, rejection with untrusted metadata.
+
+## Implementation status
+
+- Phase 0 (design doc) — done.
+- Phase 1 (protocol, minimal daemon, client, `smanagerd`) — done.
+- Phase 2 (SO_PEERCRED + uid/gid allowlists, validation, audit, event streaming) — done.
+- Phase 3 (`smanager daemon install|uninstall|status|logs`, socket activation) — done.
+- Phase 4 (group/dependency/all actions, CLI routing with fallback) — done.
+- Phase 5 (privilege drop for user scripts/commands in the daemon; `SECURITY.md`) — done
+  for the drop mechanism. `NoNewPrivileges`/`CapabilityBoundingSet`/polkit minimum-privilege
+  recipes remain to be applied in the generated unit as a follow-up.
+
+See [`SECURITY.md`](../../SECURITY.md) for the trust model.

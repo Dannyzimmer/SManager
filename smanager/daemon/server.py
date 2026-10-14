@@ -19,6 +19,7 @@ from typing import Any, Optional
 from .. import __version__
 from ..datatypes import GlobalConfig
 from ..global_manager import GlobalManager
+from ..service_managers import base_sdv2_manager
 from ..vpn import get_vpn
 from . import protocol
 from .authz import Authorizer, PeerCredentials, get_peer_credentials
@@ -365,12 +366,21 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--allow-uid", type=int, action="append", default=[], help="Allowed client uid.")
     parser.add_argument("--allow-gid", type=int, action="append", default=[], help="Allowed client gid.")
     parser.add_argument("--verbose", action="store_true", help="Verbose logging.")
+    parser.add_argument(
+        "--no-drop-scripts",
+        action="store_true",
+        help="Run user-defined scripts/commands as the daemon user instead of dropping to the service user.",
+    )
     args = parser.parse_args(argv)
 
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+
+    # By default the daemon drops privileges for user-defined scripts and inline
+    # commands so they never run as root.
+    base_sdv2_manager.set_script_privilege_drop(not args.no_drop_scripts)
 
     manager = build_manager(args.config)
     server = DaemonServer(

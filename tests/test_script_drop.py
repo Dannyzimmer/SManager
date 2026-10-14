@@ -1,0 +1,105 @@
+import os
+import subprocess
+
+import pytest
+
+import smanager.service_managers.base_sdv2_manager as bsm
+from smanager.datatypes import Service, ServiceMetadata
+from smanager.service_managers.local_manager import LocalManager
+
+try:
+    import grp
+    import pwd
+except ImportError:  # pragma: no cover
+    grp = None
+    pwd = None
+
+pytestmark = pytest.mark.skipif(pwd is None or grp is None, reason="POSIX only")
+
+
+def _current_user() -> str:
+    return pwd.getpwuid(os.getuid()).pw_name
+
+
+def _current_group() -> str:
+    return grp.getgrgid(os.getgid()).gr_name
+
+
+def _make_manager(tmp_path, sys_user, sys_group):
+    service_dir = tmp_path / "svc"
+    service_dir.mkdir()
+    (service_dir / "start.sh").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    metadata = ServiceMetadata.from_dict({
+        "name": "App",
+        "description": "x",
+        "schema_version": 2,
+        "id": "app",
+        "active": True,
+        "runtime": {"type": "local", "ports": {"webui": 1}, "sys_user": sys_user, "sys_group": sys_group},
+        "local": {"systemd_services": ["app.service"]},
+        "scripts": {"start": "start.sh"},
+    })
+    service = Service(metadata=metadata, service_abspath=str(service_dir), metadata_filename="sd_info.json")
+    return LocalManager(service, vpn=None)
+
+
+class Recorder:
+    def __init__(self):
+        self.kwargs = None
+
+    def __call__(self, argv, **kwargs):
+        self.kwargs = kwargs
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+
+@pytest.fixture(autouse=True)
+def _reset_drop():
+    bsm.set_script_privilege_drop(False)
+    yield
+    bsm.set_script_privilege_drop(False)
+
+
+def test_drop_disabled_keeps_current_user(tmp_path, monkeypatch):
+    manager = _make_manager(tmp_path, _current_user(), _current_group())
+    recorder = Recorder()
+    monkeypatch.setattr(bsm.subprocess, "run", recorder)
+    manager._run_script("start")
+    assert "user" not in recorder.kwargs
+    assert "group" not in recorder.kwargs
+
+
+def test_drop_enabled_uses_service_user(tmp_path, monkeypatch):
+    manager = _make_manager(tmp_path, _current_user(), _current_group())
+    recorder = Recorder()
+    monkeypatch.setattr(bsm.subprocess, "run", recorder)
+    bsm.set_script_privilege_drop(True)
+    manager._run_script("start")
+    assert recorder.kwargs["user"] == os.getuid()
+    assert recorder.kwargs["group"] == os.getgid()
+
+
+def test_drop_unresolvable_user_is_ignored(tmp_path, monkeypatch):
+    manager = _make_manager(tmp_path, "no-such-user-xyz", "no-such-group-xyz")
+    recorder = Recorder()
+    monkeypatch.setattr(bsm.subprocess, "run", recorder)
+    bsm.set_script_privilege_drop(True)
+    manager._run_script("start")
+    assert "user" not in recorder.kwargs
+
+
+def test_inline_update_command_drops_when_enabled(tmp_path, monkeypatch):
+    manager = _make_manager(tmp_path, _current_user(), _current_group())
+    recorder = Recorder()
+    monkeypatch.setattr(bsm.subprocess, "run", recorder)
+    bsm.set_script_privilege_drop(True)
+    manager._process_run(["echo", "hi"], cwd=str(tmp_path), drop=True)
+    assert recorder.kwargs["user"] == os.getuid()
+
+
+def test_process_run_no_drop_by_default(tmp_path, monkeypatch):
+    manager = _make_manager(tmp_path, _current_user(), _current_group())
+    recorder = Recorder()
+    monkeypatch.setattr(bsm.subprocess, "run", recorder)
+    bsm.set_script_privilege_drop(True)
+    manager._process_run(["docker", "compose", "pull"], cwd=str(tmp_path))
+    assert "user" not in recorder.kwargs

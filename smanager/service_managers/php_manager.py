@@ -41,6 +41,7 @@ class PhpManager(BaseSDV2Manager):
             check=True,
             cwd=cwd,
             env=run_env,
+            **self._script_drop_kwargs(),
         )
 
     def _run_status_command(self, command: str) -> subprocess.CompletedProcess:
@@ -59,6 +60,7 @@ class PhpManager(BaseSDV2Manager):
             check=False,
             cwd=cwd,
             env=run_env,
+            **self._script_drop_kwargs(),
         )
 
     def _start_runtime(self):

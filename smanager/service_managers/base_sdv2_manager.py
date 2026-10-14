@@ -16,6 +16,46 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 
+try:  # pragma: no cover - POSIX only
+    import grp
+    import pwd
+except ImportError:  # pragma: no cover
+    grp = None
+    pwd = None
+
+
+# When enabled (the daemon runs as root), user-defined scripts and inline
+# commands are executed as the service's ``runtime.sys_user``/``sys_group``
+# instead of root. The CLI never enables this, so local behavior is unchanged.
+_SCRIPT_DROP_ENABLED = False
+
+
+def set_script_privilege_drop(enabled: bool) -> None:
+    global _SCRIPT_DROP_ENABLED
+    _SCRIPT_DROP_ENABLED = bool(enabled)
+
+
+def script_privilege_drop_enabled() -> bool:
+    return _SCRIPT_DROP_ENABLED
+
+
+def _resolve_uid(name: str | None) -> int | None:
+    if not name or pwd is None:
+        return None
+    try:
+        return pwd.getpwnam(name).pw_uid
+    except KeyError:
+        return None
+
+
+def _resolve_gid(name: str | None) -> int | None:
+    if not name or grp is None:
+        return None
+    try:
+        return grp.getgrnam(name).gr_gid
+    except KeyError:
+        return None
+
 try:
     from packaging.version import InvalidVersion, Version
 except ImportError:  # pragma: no cover - packaging is a declared dependency
@@ -284,7 +324,7 @@ class BaseSDV2Manager(BaseManager):
                 commands = [command for command, _ in planned]
                 if not dry_run:
                     for command, cwd in planned:
-                        self._process_run(command, cwd=cwd)
+                        self._process_run(command, cwd=cwd, drop=(strategy == "command"))
                     if needs_restart:
                         # restart already re-establishes the VPN HTTPS serve.
                         self.restart()
@@ -342,6 +382,25 @@ class BaseSDV2Manager(BaseManager):
             return None
         return str(value).strip()
 
+    def _script_drop_kwargs(self) -> dict:
+        """subprocess kwargs to drop privileges for user-defined code.
+
+        Only active when explicitly enabled (the daemon) so local CLI behavior is
+        unchanged. Returns ``{}`` when disabled or when the service user cannot
+        be resolved.
+        """
+        if not _SCRIPT_DROP_ENABLED:
+            return {}
+        runtime = self.service.metadata.runtime
+        uid = _resolve_uid(getattr(runtime, "sys_user", None))
+        if uid is None:
+            return {}
+        kwargs: dict = {"user": uid}
+        gid = _resolve_gid(getattr(runtime, "sys_group", None))
+        if gid is not None:
+            kwargs["group"] = gid
+        return kwargs
+
     def _resolve_script_path(self, value: str) -> str:
         expanded = os.path.expanduser(value)
         if not os.path.isabs(expanded):
@@ -393,6 +452,7 @@ class BaseSDV2Manager(BaseManager):
                 check=True,
                 cwd=cwd,
                 env=run_env,
+                **self._script_drop_kwargs(),
             )
         except subprocess.CalledProcessError as exc:
             detail = (exc.stderr or exc.stdout or "").strip()
@@ -439,6 +499,7 @@ class BaseSDV2Manager(BaseManager):
                 check=False,
                 cwd=cwd,
                 env=run_env,
+                **self._script_drop_kwargs(),
             )
         except OSError:
             return "unknown"
@@ -565,8 +626,14 @@ class BaseSDV2Manager(BaseManager):
         self,
         command: list[str],
         cwd: str | None = None,
+        drop: bool = False,
     ) -> subprocess.CompletedProcess:
-        """Run a command for the update strategies with normalised errors."""
+        """Run a command for the update strategies with normalised errors.
+
+        ``drop=True`` (inline ``command`` strategy) runs with dropped privileges
+        when the daemon enables it.
+        """
+        extra = self._script_drop_kwargs() if drop else {}
         try:
             return subprocess.run(
                 command,
@@ -574,6 +641,7 @@ class BaseSDV2Manager(BaseManager):
                 text=True,
                 check=True,
                 cwd=cwd,
+                **extra,
             )
         except subprocess.CalledProcessError as exc:
             detail = (exc.stderr or exc.stdout or "").strip()
@@ -768,6 +836,7 @@ class BaseSDV2Manager(BaseManager):
                 check=True,
                 cwd=self._update_path(),
                 timeout=self._check_timeout,
+                **self._script_drop_kwargs(),
             )
         except subprocess.CalledProcessError as exc:
             detail = (exc.stderr or exc.stdout or "").strip()
@@ -803,6 +872,7 @@ class BaseSDV2Manager(BaseManager):
                 cwd=cwd,
                 env=run_env,
                 timeout=self._check_timeout,
+                **self._script_drop_kwargs(),
             )
         except subprocess.CalledProcessError as exc:
             detail = (exc.stderr or exc.stdout or "").strip()
