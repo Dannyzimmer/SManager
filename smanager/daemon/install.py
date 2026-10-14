@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
@@ -124,13 +125,39 @@ class Installer:
         self.socket = socket
         self.config = config
         self.user = user
-        self.exec_path = exec_path or shutil.which("smanagerd") or "/usr/bin/smanagerd"
+        self.exec_path = exec_path or self._detect_exec_path()
         self.unit_dir = os.path.join(root, unit_dir.lstrip("/"))
         self.dry_run = dry_run
         self._run = run or _default_runner
         self._group_exists = group_exists or self._system_group_exists
 
     # -- helpers -----------------------------------------------------------
+    @staticmethod
+    def _detect_exec_path() -> Optional[str]:
+        """Best-effort location of the ``smanagerd`` executable.
+
+        ``sudo`` uses a restricted PATH (``secure_path``), so with pipx the
+        daemon binary is often not on root's PATH. We therefore fall back to the
+        sibling of the running ``smanager`` CLI (both live in the same bin dir,
+        e.g. ``~/.local/bin``).
+        """
+        found = shutil.which("smanagerd")
+        if found:
+            return found
+        argv0 = None
+        try:
+            argv0 = sys.argv[0]
+        except (IndexError, AttributeError):
+            argv0 = None
+        candidates = []
+        if argv0:
+            candidates.append(os.path.join(os.path.dirname(os.path.realpath(argv0)), "smanagerd"))
+        candidates.append(os.path.join(os.path.dirname(os.path.realpath(sys.executable)), "smanagerd"))
+        for candidate in candidates:
+            if candidate and os.path.exists(candidate):
+                return candidate
+        return None
+
     @staticmethod
     def _system_group_exists(name: str) -> bool:
         if grp is None:
@@ -160,6 +187,20 @@ class Installer:
         report = InstallReport(action="install", dry_run=self.dry_run, root=self.root,
                                group=self.group, socket=self.socket, config=self.config)
 
+        exec_path = self.exec_path
+        if not exec_path:
+            if not self.dry_run:
+                raise ValueError(
+                    "could not locate the 'smanagerd' executable. Run as the user who "
+                    "installed smanager (e.g. 'sudo \"$(command -v smanager)\" daemon install') "
+                    "or pass --exec-path /path/to/smanagerd."
+                )
+            exec_path = "smanagerd"
+            report.notes.append(
+                "'smanagerd' not found on PATH; the generated unit is a preview. "
+                "Pass --exec-path to render the real path."
+            )
+
         if self._group_exists(self.group):
             report.notes.append(f"group '{self.group}' already exists")
         else:
@@ -168,7 +209,7 @@ class Installer:
         files = {
             self._unit_path(SOCKET_NAME): render_socket_unit(self.socket, self.group),
             self._unit_path(SERVICE_NAME): render_service_unit(
-                self.exec_path, self.config, self.socket, self.group, self.user
+                exec_path, self.config, self.socket, self.group, self.user
             ),
         }
         for path, content in files.items():

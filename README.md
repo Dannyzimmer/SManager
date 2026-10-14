@@ -423,11 +423,26 @@ smanager daemon status              # is the socket active?
 sudo smanager daemon uninstall
 ```
 
+> **`sudo` uses a restricted `PATH`.** With pipx, `sudo smanager` may not find the
+> command. Invoke it via its absolute path instead:
+> `sudo "$(command -v smanager)" daemon install`. The installer auto-detects
+> `smanagerd` (from `PATH` or from the sibling of the running `smanager` binary);
+> if it cannot, pass `--exec-path /path/to/smanagerd`.
+>
+> After installing, join the socket group so the unprivileged CLI can reach the
+> daemon, then re-login: `sudo usermod -aG srvmgrs "$USER"`.
+
 Once the socket exists, privileged actions (`service|group|dependency|all`
 `start|stop|restart|update|enable|disable`) are automatically routed through the
 daemon; without a daemon they fall back to local execution. Control it with
 `--daemon/--no-daemon` and `--daemon-socket`/`SMANAGER_SOCKET` (default
 `/run/smanager/smanagerd.sock`). Read-only `status`/`info` remain local.
+
+> **`git` runs as root under the daemon.** If your services update with `git pull`
+> on repositories owned by your user, Git may refuse with `detected dubious
+> ownership`; allow it with
+> `sudo git config --system --add safe.directory /path/to/repo` (or use a
+> `scripts.update` for that service).
 
 You can also run the daemon manually:
 

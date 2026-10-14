@@ -1,7 +1,10 @@
 import json
 import os
+import shutil
 import subprocess
+import sys
 
+import pytest
 from click.testing import CliRunner
 
 from smanager.cli.main import cli
@@ -75,7 +78,8 @@ def test_install_dry_run_writes_nothing(tmp_path):
 
 def test_uninstall_removes_units(tmp_path):
     system = FakeSystem()
-    installer = Installer(root=str(tmp_path), run=system.run, group_exists=system.group_exists)
+    installer = Installer(root=str(tmp_path), run=system.run, group_exists=system.group_exists,
+                          exec_path="/usr/bin/smanagerd")
     installer.install()
     unit_dir = tmp_path / "etc/systemd/system"
     assert (unit_dir / SOCKET_NAME).is_file()
@@ -87,8 +91,35 @@ def test_uninstall_removes_units(tmp_path):
 
 def test_cli_install_dry_run_json():
     runner = CliRunner()
-    result = runner.invoke(cli, ["daemon", "install", "--dry-run", "--json"])
+    result = runner.invoke(cli, ["daemon", "install", "--dry-run", "--json", "--exec-path", "/usr/bin/smanagerd"])
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assert payload["action"] == "install"
     assert payload["dry_run"] is True
+
+
+def test_install_missing_exec_path_errors(tmp_path, monkeypatch):
+    monkeypatch.setattr(Installer, "_detect_exec_path", staticmethod(lambda: None))
+    system = FakeSystem()
+    installer = Installer(root=str(tmp_path), run=system.run, group_exists=system.group_exists)
+    with pytest.raises(ValueError) as exc:
+        installer.install()
+    assert "smanagerd" in str(exc.value)
+
+
+def test_dry_run_missing_exec_path_notes_but_renders(tmp_path, monkeypatch):
+    monkeypatch.setattr(Installer, "_detect_exec_path", staticmethod(lambda: None))
+    system = FakeSystem()
+    report = Installer(root=str(tmp_path), run=system.run, group_exists=system.group_exists,
+                       dry_run=True).install()
+    assert any("not found" in note for note in report.notes)
+    assert report.files
+
+
+def test_detect_exec_path_sibling(tmp_path, monkeypatch):
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "smanagerd").write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", [str(bin_dir / "smanager")])
+    assert Installer._detect_exec_path() == str(bin_dir / "smanagerd")

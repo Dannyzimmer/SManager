@@ -55,18 +55,32 @@ def _require_root(dry_run: bool) -> None:
 @click.option("--socket", default=DEFAULT_SOCKET, help="Unix socket path.")
 @click.option("--config", "config_path", default=DEFAULT_CONFIG, help="Config file the daemon reads.")
 @click.option("--user", default="root", help="User the daemon runs as.")
+@click.option("--exec-path", default=None, metavar="PATH",
+              help="Path to the smanagerd executable (auto-detected when omitted).")
 @click.option("--dry-run", is_flag=True, default=False, help="Print artifacts without changing the system.")
 @click.option("--json", "as_json", is_flag=True, default=False, help="Output as JSON.")
-def install_cmd(group: str, socket: str, config_path: str, user: str, dry_run: bool, as_json: bool) -> None:
+def install_cmd(
+    group: str,
+    socket: str,
+    config_path: str,
+    user: str,
+    exec_path: str | None,
+    dry_run: bool,
+    as_json: bool,
+) -> None:
     """Install the systemd socket + service for smanagerd."""
     _require_root(dry_run)
-    report = Installer(
-        group=group,
-        socket=socket,
-        config=config_path,
-        user=user,
-        dry_run=dry_run,
-    ).install()
+    try:
+        report = Installer(
+            group=group,
+            socket=socket,
+            config=config_path,
+            user=user,
+            exec_path=exec_path,
+            dry_run=dry_run,
+        ).install()
+    except ValueError as exc:
+        raise click.ClickException(str(exc))
     _emit_report(report, as_json)
 
 
