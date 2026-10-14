@@ -1,7 +1,6 @@
 import click
 
-from ..config import get_manager
-from ..events import attach_cli_event_renderer
+from ..daemon_client import run_action
 from .info import emit_service_info
 from .status import emit_service_status
 
@@ -22,14 +21,7 @@ def _run_service_action(
     service_id: str,
     dry_run: bool = False,
 ) -> None:
-    manager = get_manager(ctx)
-    detach_renderer = attach_cli_event_renderer(manager, command_scope="service")
-    try:
-        manager.manage_service(service_id, action, dry_run=dry_run)
-    except Exception as e:
-        raise click.ClickException(str(e))
-    finally:
-        detach_renderer()
+    run_action(ctx, "service", action, service_id=service_id, dry_run=dry_run)
 
 
 @service_cmd.command(name="start")

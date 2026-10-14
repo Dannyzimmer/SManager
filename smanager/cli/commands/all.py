@@ -1,7 +1,6 @@
 import click
 
-from ..config import get_manager
-from ..events import attach_cli_event_renderer
+from ..daemon_client import run_action
 from .info import emit_all_info
 from .status import emit_all_status
 
@@ -28,14 +27,7 @@ def _run_all_action(
         raise click.UsageError(
             f"This will run '{action}' on ALL services. Pass --yes to confirm."
         )
-    manager = get_manager(ctx)
-    detach_renderer = attach_cli_event_renderer(manager, command_scope="all")
-    try:
-        manager.manage_all(action, dry_run=dry_run)
-    except Exception as e:
-        raise click.ClickException(str(e))
-    finally:
-        detach_renderer()
+    run_action(ctx, "all", action, dry_run=dry_run)
 
 
 @all_cmd.command(name="start")

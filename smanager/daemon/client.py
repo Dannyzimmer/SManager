@@ -198,3 +198,30 @@ class DaemonClient:
             on_event=on_event,
             timeout=timeout,
         )
+
+    def group_action(self, group_name: str, action: str, dry_run: bool = False,
+                     on_event: Optional[EventCallback] = None, timeout: Optional[float] = None) -> dict:
+        return self.request(
+            "group.action",
+            {"group": group_name, "action": action, "dry_run": dry_run},
+            on_event=on_event,
+            timeout=timeout,
+        )
+
+    def dependency_action(self, dependency_name: str, action: str, dry_run: bool = False,
+                          on_event: Optional[EventCallback] = None, timeout: Optional[float] = None) -> dict:
+        return self.request(
+            "dependency.action",
+            {"dependency": dependency_name, "action": action, "dry_run": dry_run},
+            on_event=on_event,
+            timeout=timeout,
+        )
+
+    def all_action(self, action: str, dry_run: bool = False,
+                   on_event: Optional[EventCallback] = None, timeout: Optional[float] = None) -> dict:
+        return self.request(
+            "all.action",
+            {"action": action, "dry_run": dry_run},
+            on_event=on_event,
+            timeout=timeout,
+        )

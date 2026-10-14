@@ -104,6 +104,12 @@ class DaemonServer:
             return self._handle_service_status(params)
         if method == "service.action":
             return self._handle_service_action(params, handler, request.get("id"), creds)
+        if method == "group.action":
+            return self._handle_collection_action("group", params, handler, request.get("id"), creds)
+        if method == "dependency.action":
+            return self._handle_collection_action("dependency", params, handler, request.get("id"), creds)
+        if method == "all.action":
+            return self._handle_collection_action("all", params, handler, request.get("id"), creds)
 
         raise protocol.ProtocolError(protocol.ERR_UNKNOWN_METHOD, f"unknown method '{method}'")
 
@@ -167,6 +173,45 @@ class DaemonServer:
 
         self.audit("service.action", creds=creds, service_id=service_id, action=action, result="ok")
         return {"id": service_id, "action": action, "ok": True}
+
+    def _handle_collection_action(self, scope: str, params: dict, handler, request_id, creds) -> dict:
+        action = params.get("action")
+        if action not in SERVICE_ACTIONS:
+            raise protocol.ProtocolError(
+                protocol.ERR_UNSUPPORTED_ACTION,
+                f"unsupported action '{action}'",
+                {"supported": sorted(SERVICE_ACTIONS)},
+            )
+        dry_run = bool(params.get("dry_run", False))
+        identifier = None
+        if scope == "group":
+            identifier = params.get("group")
+            if not isinstance(identifier, str) or not identifier:
+                raise protocol.ProtocolError(protocol.ERR_BAD_REQUEST, "missing 'group'")
+        elif scope == "dependency":
+            identifier = params.get("dependency")
+            if not isinstance(identifier, str) or not identifier:
+                raise protocol.ProtocolError(protocol.ERR_BAD_REQUEST, "missing 'dependency'")
+
+        self._tls.handler = handler
+        self._tls.request_id = request_id
+        try:
+            if scope == "group":
+                self.manager.manage_group(identifier, action, dry_run=dry_run)
+            elif scope == "dependency":
+                self.manager.manage_by_dependency(identifier, action, dry_run=dry_run)
+            else:
+                self.manager.manage_all(action, dry_run=dry_run)
+        finally:
+            self._tls.handler = None
+            self._tls.request_id = None
+
+        self.audit(
+            f"{scope}.action", creds=creds,
+            **{f"{scope}_name": identifier} if identifier else {},
+            action=action, result="ok",
+        )
+        return {"scope": scope, "identifier": identifier, "action": action, "ok": True}
 
     def _get_service(self, service_id: str):
         try:

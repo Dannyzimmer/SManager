@@ -91,6 +91,28 @@ class FakeManager:
             phase="after", source="FakeManager", service_id=service_id,
         ))
 
+    def manage_group(self, group_name, action, dry_run=False):
+        self.event_dispatcher.emit(ManagerEvent(
+            name=f"group.{action}.before", scope="group", action=action,
+            phase="before", source="FakeManager", group_name=group_name,
+        ))
+        self.event_dispatcher.emit(ManagerEvent(
+            name=f"group.{action}.after", scope="group", action=action,
+            phase="after", source="FakeManager", group_name=group_name,
+        ))
+
+    def manage_by_dependency(self, dependency_name, action, dry_run=False):
+        self.event_dispatcher.emit(ManagerEvent(
+            name=f"dependency.{action}.after", scope="dependency", action=action,
+            phase="after", source="FakeManager", dependency_name=dependency_name,
+        ))
+
+    def manage_all(self, action, dry_run=False):
+        self.event_dispatcher.emit(ManagerEvent(
+            name=f"all.{action}.after", scope="all", action=action,
+            phase="after", source="FakeManager",
+        ))
+
     def discover_services(self):
         return self.services
 
@@ -257,6 +279,54 @@ def test_unauthorized_peer(tmp_path):
     finally:
         server.shutdown()
         thread.join(timeout=5)
+
+
+def test_group_action_streams_group_events(daemon_env):
+    events = []
+    with DaemonClient(daemon_env["socket_path"]) as client:
+        result = client.group_action("media", "restart", on_event=events.append)
+    assert result["ok"] is True
+    assert {"group"} == {e["scope"] for e in events}
+    assert any(e["phase"] == "after" for e in events)
+
+
+# ---------------------------------------------------------------------------
+# CLI routing through the daemon
+# ---------------------------------------------------------------------------
+def test_cli_routes_action_through_daemon(daemon_env):
+    from click.testing import CliRunner
+    from smanager.cli.main import cli
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli, ["--daemon-socket", daemon_env["socket_path"], "service", "start", "demo"]
+    )
+    assert result.exit_code == 0, result.output
+    assert "[OK] 'start' on service 'demo'." in result.output
+
+
+def test_cli_routes_group_action_through_daemon(daemon_env):
+    from click.testing import CliRunner
+    from smanager.cli.main import cli
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli, ["--daemon-socket", daemon_env["socket_path"], "group", "restart", "media"]
+    )
+    assert result.exit_code == 0, result.output
+    assert "[OK] 'restart' on group 'media'." in result.output
+
+
+def test_cli_daemon_forced_but_down():
+    from click.testing import CliRunner
+    from smanager.cli.main import cli
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli, ["--daemon", "--daemon-socket", "/tmp/smanager-nope.sock", "service", "start", "demo"]
+    )
+    assert result.exit_code != 0
+    assert "cannot connect" in result.output.lower()
 
 
 def test_concurrent_clients(daemon_env):

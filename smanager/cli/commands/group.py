@@ -1,7 +1,6 @@
 import click
 
-from ..config import get_manager
-from ..events import attach_cli_event_renderer
+from ..daemon_client import run_action
 from .info import emit_group_info
 from .status import emit_group_status
 
@@ -22,14 +21,7 @@ def _run_group_action(
     group_name: str,
     dry_run: bool = False,
 ) -> None:
-    manager = get_manager(ctx)
-    detach_renderer = attach_cli_event_renderer(manager, command_scope="group")
-    try:
-        manager.manage_group(group_name, action, dry_run=dry_run)
-    except Exception as e:
-        raise click.ClickException(str(e))
-    finally:
-        detach_renderer()
+    run_action(ctx, "group", action, group_name=group_name, dry_run=dry_run)
 
 
 @group_cmd.command(name="start")

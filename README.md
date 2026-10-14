@@ -415,12 +415,28 @@ back to local execution when the daemon is unavailable).
 The full design (architecture, NDJSON protocol, authorization/trust model, threat model,
 decisions and phased plan) lives in [`docs/design/smanagerd.md`](docs/design/smanagerd.md).
 
-Phase 1 (current) ships the protocol, a minimal daemon and an unprivileged client; the CLI
-is not wired to it yet (feature-flag). You can run it manually:
+Install it (root; never during `pip install`):
+
+```bash
+sudo smanager daemon install        # group + systemd socket/service (socket activation)
+smanager daemon status              # is the socket active?
+sudo smanager daemon uninstall
+```
+
+Once the socket exists, privileged actions (`service|group|dependency|all`
+`start|stop|restart|update|enable|disable`) are automatically routed through the
+daemon; without a daemon they fall back to local execution. Control it with
+`--daemon/--no-daemon` and `--daemon-socket`/`SMANAGER_SOCKET` (default
+`/run/smanager/smanagerd.sock`). Read-only `status`/`info` remain local.
+
+You can also run the daemon manually:
 
 ```bash
 smanagerd --config /path/smanager.yaml --socket /run/smanager/smanagerd.sock
 ```
+
+> **Security:** membership in the socket group (`srvmgrs`) lets a user manage
+> services as the daemon does (effectively root). Add only trusted users.
 
 ## Notes
 - `metadata init` creates a new file.

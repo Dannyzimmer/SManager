@@ -104,3 +104,35 @@ def _format_failed_event(event: ManagerEvent) -> str:
         detail = str(event.error)
 
     return f"[ERR] '{event.action}' on {target}: {detail}"
+
+
+class DaemonEvent:
+    """Lightweight view of a daemon event dict, matching ManagerEvent fields."""
+
+    __slots__ = (
+        "name", "scope", "action", "phase", "source", "service_id",
+        "group_name", "dependency_name", "message", "payload", "error",
+    )
+
+    def __init__(self, data: dict) -> None:
+        self.name = data.get("name", "")
+        self.scope = data.get("scope", "")
+        self.action = data.get("action", "")
+        self.phase = data.get("phase", "")
+        self.source = data.get("source", "daemon")
+        self.service_id = data.get("service_id")
+        self.group_name = data.get("group_name")
+        self.dependency_name = data.get("dependency_name")
+        self.message = data.get("message")
+        self.payload = data.get("payload") or {}
+        error = data.get("error")
+        self.error = RuntimeError(error.get("message", "")) if error else None
+
+
+def event_from_dict(data: dict) -> DaemonEvent:
+    return DaemonEvent(data)
+
+
+def format_event_dict(data: dict, command_scope: str) -> str | None:
+    """Format a raw daemon event dict using the same rules as local events."""
+    return _format_event_for_cli(DaemonEvent(data), command_scope)

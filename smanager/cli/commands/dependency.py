@@ -1,7 +1,6 @@
 import click
 
-from ..config import get_manager
-from ..events import attach_cli_event_renderer
+from ..daemon_client import run_action
 from .info import emit_dependency_info
 from .status import emit_dependency_status
 
@@ -22,14 +21,7 @@ def _run_dependency_action(
     dependency_name: str,
     dry_run: bool = False,
 ) -> None:
-    manager = get_manager(ctx)
-    detach_renderer = attach_cli_event_renderer(manager, command_scope="dependency")
-    try:
-        manager.manage_by_dependency(dependency_name, action, dry_run=dry_run)
-    except Exception as e:
-        raise click.ClickException(str(e))
-    finally:
-        detach_renderer()
+    run_action(ctx, "dependency", action, dependency_name=dependency_name, dry_run=dry_run)
 
 
 @dependency_cmd.command(name="start")
