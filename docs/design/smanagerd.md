@@ -220,5 +220,9 @@ Entry point `smanagerd = smanager.daemon.server:main`.
   so the first client request appeared to hang until timeout.
 - The client falls back to local execution (with a warning) when the daemon does not answer the
   handshake in time, and uses a short connect timeout separate from the action timeout.
+- The daemon now accepts `update`, `enable` and `disable` (and their group/dependency/all
+  variants). Update drops privileges for `scripts.*`, inline `command` and the `git`/`composer`
+  strategies; `enable`/`disable` write metadata atomically while preserving the original
+  owner/group/mode.
 
 See [`SECURITY.md`](../../SECURITY.md) for the trust model.

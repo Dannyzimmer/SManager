@@ -230,10 +230,21 @@ def parse_json_text(text: str) -> Any:
 
 
 def atomic_write_json(path: Path, data: Any, backup: bool = True) -> None:
-    """Write *data* as JSON to *path* atomically, keeping a ``.bak`` copy."""
+    """Write *data* as JSON to *path* atomically, keeping a ``.bak`` copy.
+
+    When the target already exists its owner/group and permission bits are
+    preserved, so a privileged writer (the daemon running as root) never leaves
+    a metadata file owned by root.
+    """
     path = Path(path)
     parent = path.parent
     parent.mkdir(parents=True, exist_ok=True)
+
+    original_stat = None
+    try:
+        original_stat = path.stat()
+    except OSError:
+        original_stat = None
 
     fd, tmp_name = tempfile.mkstemp(dir=str(parent), prefix=path.name + ".", suffix=".tmp")
     try:
@@ -242,6 +253,15 @@ def atomic_write_json(path: Path, data: Any, backup: bool = True) -> None:
             handle.write("\n")
             handle.flush()
             os.fsync(handle.fileno())
+        if original_stat is not None:
+            try:
+                os.chmod(tmp_name, original_stat.st_mode & 0o7777)
+            except OSError:
+                pass
+            try:
+                os.chown(tmp_name, original_stat.st_uid, original_stat.st_gid)
+            except OSError:
+                pass
         if backup and path.exists():
             shutil.copy2(path, path.with_name(path.name + ".bak"))
         os.replace(tmp_name, path)

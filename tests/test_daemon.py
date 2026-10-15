@@ -187,6 +187,28 @@ def test_action_streams_events(daemon_env):
     assert all(e["service_id"] == "demo" for e in events)
 
 
+def test_daemon_accepts_update_enable_disable(daemon_env):
+    events = []
+    with DaemonClient(daemon_env["socket_path"]) as client:
+        for action in ("update", "enable", "disable"):
+            assert client.action("demo", action, on_event=events.append)["ok"] is True
+
+
+def test_daemon_collection_extended_actions(daemon_env):
+    with DaemonClient(daemon_env["socket_path"]) as client:
+        assert client.group_action("media", "update")["ok"] is True
+        assert client.dependency_action("qbittorrent", "enable")["ok"] is True
+        assert client.all_action("disable")["ok"] is True
+
+
+def test_daemon_enable_dry_run_is_noop(daemon_env):
+    events = []
+    with DaemonClient(daemon_env["socket_path"]) as client:
+        result = client.action("demo", "enable", dry_run=True, on_event=events.append)
+    assert result["ok"] is True
+    assert events == []  # skipped as a dry-run no-op
+
+
 def test_action_unsupported(daemon_env):
     with DaemonClient(daemon_env["socket_path"]) as client:
         with pytest.raises(DaemonError) as exc:

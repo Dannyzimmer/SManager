@@ -438,11 +438,13 @@ daemon; without a daemon they fall back to local execution. Control it with
 `--daemon/--no-daemon` and `--daemon-socket`/`SMANAGER_SOCKET` (default
 `/run/smanager/smanagerd.sock`). Read-only `status`/`info` remain local.
 
-> **`git` runs as root under the daemon.** If your services update with `git pull`
-> on repositories owned by your user, Git may refuse with `detected dubious
-> ownership`; allow it with
-> `sudo git config --system --add safe.directory /path/to/repo` (or use a
-> `scripts.update` for that service).
+> **Privileges under the daemon.** The daemon runs `systemctl` and
+> `docker compose` with its own privileges, but user-controlled code
+> (`scripts.*`, inline `command`, and the `git`/`composer` update strategies) is
+> executed as the service's `runtime.sys_user`/`sys_group`, so it never creates
+> root-owned files. `enable`/`disable` rewrite the metadata atomically while
+> preserving the file's owner/group/mode (a root daemon does not turn the file
+> root-owned).
 
 You can also run the daemon manually:
 

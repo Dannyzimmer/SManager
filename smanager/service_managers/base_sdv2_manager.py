@@ -64,6 +64,7 @@ except ImportError:  # pragma: no cover - packaging is a declared dependency
 
 from . import BaseManager
 from ..datatypes import Service, UpdateInfo
+from ..metadata_ops import atomic_write_json
 from ..vpn import VPNService
 
 GITHUB_API = "https://api.github.com/repos/{repo}/releases/latest"
@@ -116,9 +117,7 @@ class BaseSDV2Manager(BaseManager):
             service_id=self.get_id(),
         )
         try:
-            self.service.metadata.active = True
-            output_path = os.path.join(self.service.service_abspath, self.service.metadata_filename)
-            self.service.metadata.write_to_json(output_path)
+            self._write_active(True)
         except Exception as exc:
             self._emit_event(
                 scope="service",
@@ -145,9 +144,7 @@ class BaseSDV2Manager(BaseManager):
             service_id=self.get_id(),
         )
         try:
-            self.service.metadata.active = False
-            output_path = os.path.join(self.service.service_abspath, self.service.metadata_filename)
-            self.service.metadata.write_to_json(output_path)
+            self._write_active(False)
         except Exception as exc:
             self._emit_event(
                 scope="service",
@@ -164,6 +161,26 @@ class BaseSDV2Manager(BaseManager):
             service_id=self.get_id(),
             payload={"active": False},
         )
+
+    def _write_active(self, active: bool) -> None:
+        """Persist the ``active`` flag atomically.
+
+        Unknown top-level keys in the on-disk file are preserved, and (when the
+        target exists) its owner/group/mode are kept, so a root daemon does not
+        leave the metadata owned by root.
+        """
+        output_path = os.path.join(self.service.service_abspath, self.service.metadata_filename)
+        self.service.metadata.active = active
+        data = self.service.metadata.to_dict()
+        try:
+            with open(output_path, "r", encoding="utf-8") as handle:
+                raw = json.load(handle)
+            if isinstance(raw, dict):
+                raw["active"] = active
+                data = raw
+        except (OSError, ValueError):
+            pass
+        atomic_write_json(output_path, data, backup=False)
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -324,7 +341,10 @@ class BaseSDV2Manager(BaseManager):
                 commands = [command for command, _ in planned]
                 if not dry_run:
                     for command, cwd in planned:
-                        self._process_run(command, cwd=cwd, drop=(strategy == "command"))
+                        # User-controlled code paths drop privileges; docker is
+                        # run as the daemon user (needs the docker group/root).
+                        drop = strategy in {"command", "git", "composer"}
+                        self._process_run(command, cwd=cwd, drop=drop)
                     if needs_restart:
                         # restart already re-establishes the VPN HTTPS serve.
                         self.restart()

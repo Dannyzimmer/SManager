@@ -28,8 +28,8 @@ from .catalog import Catalog
 logger = logging.getLogger("smanagerd")
 audit_logger = logging.getLogger("smanagerd.audit")
 
-# Actions exposed in Phase 1. Extended in later phases.
-SERVICE_ACTIONS = {"start", "stop", "restart"}
+# Lifecycle actions the daemon is allowed to run (reuses GlobalManager).
+SERVICE_ACTIONS = {"start", "stop", "restart", "update", "enable", "disable"}
 
 DEFAULT_SOCKET_PATH = "/run/smanager/smanagerd.sock"
 LISTEN_FDS_START = 3
@@ -190,7 +190,9 @@ class DaemonServer:
         self._tls.request_id = request_id
         try:
             with self._locks[service_id]:
-                self.manager.manage_service(service_id, action, dry_run=dry_run)
+                # enable/disable mutate metadata; respect dry_run as a no-op.
+                if not (dry_run and action in {"enable", "disable"}):
+                    self.manager.manage_service(service_id, action, dry_run=dry_run)
         finally:
             self._tls.handler = None
             self._tls.request_id = None
@@ -220,12 +222,13 @@ class DaemonServer:
         self._tls.handler = handler
         self._tls.request_id = request_id
         try:
-            if scope == "group":
-                self.manager.manage_group(identifier, action, dry_run=dry_run)
-            elif scope == "dependency":
-                self.manager.manage_by_dependency(identifier, action, dry_run=dry_run)
-            else:
-                self.manager.manage_all(action, dry_run=dry_run)
+            if not (dry_run and action in {"enable", "disable"}):
+                if scope == "group":
+                    self.manager.manage_group(identifier, action, dry_run=dry_run)
+                elif scope == "dependency":
+                    self.manager.manage_by_dependency(identifier, action, dry_run=dry_run)
+                else:
+                    self.manager.manage_all(action, dry_run=dry_run)
         finally:
             self._tls.handler = None
             self._tls.request_id = None

@@ -1,10 +1,12 @@
 import os
 import subprocess
+from pathlib import Path
 
 import pytest
 
 import smanager.service_managers.base_sdv2_manager as bsm
-from smanager.datatypes import Service, ServiceMetadata
+from smanager.datatypes import Service, ServiceMetadata, UpdateSection
+from smanager.service_managers.docker_manager import DockerManager
 from smanager.service_managers.local_manager import LocalManager
 
 try:
@@ -103,3 +105,69 @@ def test_process_run_no_drop_by_default(tmp_path, monkeypatch):
     bsm.set_script_privilege_drop(True)
     manager._process_run(["docker", "compose", "pull"], cwd=str(tmp_path))
     assert "user" not in recorder.kwargs
+
+
+def test_update_git_strategy_drops(tmp_path, monkeypatch):
+    manager = _make_manager(tmp_path, _current_user(), _current_group())
+    manager.service.metadata.update = UpdateSection(strategy="auto")
+    (Path(manager.service.service_abspath) / ".git").mkdir()
+
+    captured = {}
+
+    def fake_process(command, cwd=None, drop=False):
+        captured["drop"] = drop
+        return None
+
+    monkeypatch.setattr(manager, "_process_run", fake_process)
+    monkeypatch.setattr(manager, "restart", lambda: None)
+    bsm.set_script_privilege_drop(True)
+
+    manager.update()
+    assert captured["drop"] is True
+
+
+def test_update_command_strategy_drops(tmp_path, monkeypatch):
+    manager = _make_manager(tmp_path, _current_user(), _current_group())
+    manager.service.metadata.update = UpdateSection(strategy="command", command="touch marker")
+
+    captured = {}
+
+    def fake_process(command, cwd=None, drop=False):
+        captured["drop"] = drop
+        return None
+
+    monkeypatch.setattr(manager, "_process_run", fake_process)
+    bsm.set_script_privilege_drop(True)
+
+    manager.update()
+    assert captured["drop"] is True
+
+
+def test_update_docker_strategy_does_not_drop(tmp_path, monkeypatch):
+    service_dir = tmp_path / "dockersvc"
+    service_dir.mkdir()
+    (service_dir / "compose.yaml").write_text("services: {}\n", encoding="utf-8")
+    metadata = ServiceMetadata.from_dict({
+        "name": "App",
+        "description": "x",
+        "schema_version": 2,
+        "id": "app",
+        "active": True,
+        "runtime": {"type": "docker", "ports": {"webui": 1}, "sys_user": "u", "sys_group": "g"},
+        "docker": {"compose_file": "compose.yaml"},
+        "update": {"strategy": "docker"},
+    })
+    service = Service(metadata=metadata, service_abspath=str(service_dir), metadata_filename="sd_info.json")
+    manager = DockerManager(service, vpn=None)
+
+    captured = {}
+
+    def fake_process(command, cwd=None, drop=False):
+        captured["drop"] = drop
+        return None
+
+    monkeypatch.setattr(manager, "_process_run", fake_process)
+    bsm.set_script_privilege_drop(True)
+
+    manager.update()
+    assert captured["drop"] is False
